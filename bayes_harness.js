@@ -1,6 +1,8 @@
 var csv = require('csv');
 var url = require('url');
 var S = require('string');
+var StatsArray = require('stats-array')
+
 
 var header = true;
 
@@ -21,7 +23,10 @@ var tokcount = process.argv[4];
 var tlen = process.argv[5];	
 
 /* get the number of documents tokenized to reset the TF*IDF state*/		
-var nDocsReset = process.argv[6];				
+var nDocsReset = process.argv[6];
+
+/* get the number of codes at mininum that must be present to use a domain classifier*/		
+var nCodesThreshold = process.argv[7];					
 
 
 // init classifiers and TF*IDF
@@ -38,6 +43,18 @@ var short_doc = 0;
 var total_count = 0;
 
 var training_data = [];
+var previous_text = '';
+var bReady = false;
+
+
+function cleanText (text)
+{
+	text = S(strRow).stripTags().s;
+ 	text = S(text).stripPunctuation().s;
+ 	text = text.toLowerCase(text);
+ 	
+ 	return text;
+}
 
 csv()
 .from.path(csvfile, { columns: true, delimiter: "\t" } )
@@ -50,9 +67,7 @@ csv()
 	{
 		console.log("Learned "+ total_count+" coded projects.");
 	}
-	
-	
-	
+
 	if (header)
     {
     	strHeader ='';
@@ -72,6 +87,8 @@ csv()
  		short_desc ='';
  		long_desc ='';
  		donor = '';
+ 		recipient = '';
+ 		project_id = '';
  		for (key in data)
     	{	
     		var rec;
@@ -85,6 +102,14 @@ csv()
     	    if (key == 'org')
     	    {
     	    	donor = (data[key]);
+    	    }
+    	     if (key == 'project_id')
+    	    {
+    	    	project_id = (data[key]);
+    	    }
+    	    if (key == 'recipient')
+    	    {
+    	    	recipient = (data[key]);
     	    }
     	    if (key == 'title') 
     	    {
@@ -104,24 +129,24 @@ csv()
  			
  			  
  		}
+ 		
+ 		//clean up the fields
+ 		strRow = cleanText(strRow);
+ 	
  		var rec = {
     		act_code: act_code,
     		sector: sector,
     		donor: donor,
+    		project_id : project_id,
+    		recipient: recipient,
     		super_sector: super_sector,
-    		title: title,
-    		short_desc: short_desc,
-    		long_desc: long_desc,
+    		text : strRow
 		}
- 		//save record in training data
- 		training_data.push(rec);
- 		var text = S(strRow).stripTags().s;
- 		text = S(text).stripPunctuation().s;
- 		text = text.toLowerCase(text);
- 
+
+ 		text = strRow;
  		//if doc length greater than length, tokenize using TF*IDF
- 		if (text.length > tlen)
- 		{
+ 		if ((text.length > tlen) && (text != previous_text))
+		{
  			tfidf.addDocument(text);
  			var i =0;
  			text = '';
@@ -134,39 +159,57 @@ csv()
 				
 			});
 			doc++;
+			rec.text = text;
+			previous_text = text;
 			
 			//check if we should reset the TF*IDF//
 			if ((doc % nDocsReset) == 0)
 			{
-				//console.log ("\tReseting TF*IDF doc repo...");
+				tfidf = null;
 				tfidf = new TfIdf();
 				doc = 0;
 			}
  		}
- 		else
- 		{
- 			//console.log("Training on short document #"+short_doc);
- 			short_doc++;
- 		}
  		
- 			//the default classifier
- 			classifier.learn(text, act_code); 
+ 		//save record
+ 		training_data.push(rec);
+ 		
+		//the default classifier
+		classifier.learn(text, act_code); 
  		
  	}
  })
  .on('end', function(count){
-    var s = JSON.stringify(tfidf);
- 	console.log("Done Training: Total Records: "+count);
- 	console.log("-----------BELOW THIS LINE IS TF-IDF SERIALIZED-------------")
- 	console.log(s);
- 	var sys = require("sys");
-	
-	
+  
+    bReady = true;
+    var nProjectsCodes = [];
+    var nProjs = 0;
+  	// project codes
+  	for (var y = 0; y < training_data.length; y++)
+	{
+		if (!nProjectsCodes[training_data[y].project_id])
+		{
+			nProjectsCodes[training_data[y].project_id] = 1;
+			nProjs  = nProjs + 1;
+
+		}
+		else
+		{
+			nProjectsCodes[training_data[y].project_id]++;
+		}
+	}
+	classifier.codelength = Math.round(count/nProjs);
+	console.log("Done Training: Total Records: "+count);
+ 	
 })
 
 var sys = require("sys");
 	
 	var my_http = require("http");
+	var nCodeLength = 0;
+	var nMaxCodes = 1;
+	var nMinCodes = 1;
+	
 	my_http.createServer(function(req,res){
 	
 		var body = "";
@@ -180,114 +223,234 @@ var sys = require("sys");
   		input_string = queryData.description;
   		sector = queryData.sector;
   		donor = queryData.donor;
+  		recipient = queryData.recipient;
   		var bDSClass = false;
   		req.on('end', function () {
     		
-    		var len = input_string.length;
-    		var test;
-    		
-    		//test = classifier.categorize_list(input_string);
-    		if (!(donor in aClassifiers))
+    		if (bReady)
     		{
-    			aClassifiers[donor] = bayes();
-    			console.log("\tCreating Donor Specific Coder for: "+donor);
-    			doc = 0;	
-    			var tfidf_spec = new TfIdf();
-    			previous_text = '';
-    			for (var y = 0; y < training_data.length; y++)
-    			{
-    				if (training_data[y].donor == donor)
-    				{
-    					
-    					//console.log("\tTraining Donor Specific Coder for: "+donor);
-    					var text =  training_data[y].title+" "+ training_data[y].short_desc+" "+training_data[y].long_desc;
-    					
-    					var text = S(text).stripTags().s;
- 						text = S(text).stripPunctuation().s;
- 						text = text.toLowerCase(text);
- 
- 						//if doc length greater than length, tokenize using TF*IDF
- 						if ((text.length > tlen) && (text != previous_text))
- 						{
- 							tfidf_spec.addDocument(text);
- 							var i =0;
- 							text = '';
- 							tfidf_spec.listTerms(doc).forEach(function(item) {
- 			    				i++;
-								if( i <= tokcount)
-								{
-									text += item.term+' '; 
-								}
-						});
-						previous_text = text;					
-						doc++;
-						
-						//check if we should reset the TF*IDF//
-						if (((doc+1) % nDocsReset) == 0)
+				var len = input_string.length;
+				var test;
+				var szClass = 'Donor + Recipient';
+				var classKey =  donor + recipient;
+				var nCodes = 0;
+				var nProjectsCodes = [];
+				var training_size = 0;
+				var nProjs = 0;
+				bDSClass = false;
+			
+				while (!bDSClass)
+				{
+				
+					//if we dont already have a classifier for this class
+				
+					if (!(classKey  in aClassifiers))
+					{
+						console.log("\tCreating Class Specific Coder for: "+classKey);
+						doc = 0;	
+						var tfidf_spec = new TfIdf();
+						previous_text = '';
+					
+						//count training size
+						for (var y = 0; y < training_data.length; y++)
 						{
-							//console.log ("\tReseting TF*IDF doc repo...");
-							tfidf_spec = new TfIdf();
-							doc = 0;
+							//set key
+							if (szClass == 'Donor + Recipient')
+							{
+								thisKey =  training_data[y].donor +training_data[y].recipient;
+							}
+							else  if (szClass == 'Donor') 
+							{
+								thisKey =  training_data[y].donor;
+							}
+							if (thisKey == classKey)
+							{
+								training_size++;
+							}
+						
 						}
- 					}
-    					aClassifiers[donor].learn(text,  training_data[y].act_code);
-    					bDSClass = true;
-    				}	
-    			}
-    			//aClassifiers[donor] = classifier_0;
-    			console.log("\tDone.");
-    			if (bDSClass)
-    			{
-    				console.log("\tUsing Donor Specific Coder for: "+donor);
-    				test = aClassifiers[donor].categorize_list(input_string);
-    			}
-    			else
-    			{
-    				aClassifiers[donor] = null;
-    				console.log("\tUsing Default Classifier for: "+donor);
-    				test = classifier.categorize_list(input_string);
-    			}
-    		}
-    		else
-    		{
-    			//console.log(aClassifiers[donor]);
-    			if (aClassifiers[donor])
-    			{
-    				console.log("\tUsing Donor Specific Coder for: "+donor);
-    				test = aClassifiers[donor].categorize_list(input_string);
-    			}
-    			else
-    			{
-    				console.log("\tUsing Default Classifier for: "+donor);
-    				test = classifier.categorize_list(input_string);
-    			}
-    		}
-    		
-    		
-    		test.sort(function(a, b){
- 				return a.probability-b.probability
+					
+						if (training_size > nCodesThreshold)
+						{
+							for (var y = 0; y < training_data.length; y++)
+							{
+								//set key
+								if (szClass == 'Donor + Recipient')
+								{
+									thisKey =  training_data[y].donor +training_data[y].recipient;
+								}
+								else  if (szClass == 'Donor') 
+								{
+									thisKey =  training_data[y].donor;
+								}
+								if (thisKey == classKey)
+								{
+									// create the classifier
+									if (!aClassifiers[classKey]) 
+									{
+										aClassifiers[classKey] = bayes();
+									}
+									// keep track of codes per project
+									if (!nProjectsCodes[training_data[y].project_id])
+									{
+										nProjectsCodes[training_data[y].project_id] = 1;
+										nProjs  = nProjs + 1;
+				
+									}
+									else
+									{
+										nProjectsCodes[training_data[y].project_id]++;
+									}
+						
+									//learn the project/codes
+									var text =  training_data[y].text;			
+									aClassifiers[classKey].learn(text,  training_data[y].act_code);
+									bDSClass = true;
+								}	
+							}
+						}
+				
+					//if we have a good class to attempt classification with
+					if (bDSClass)
+					{
+						var arCodes = [];
+						console.log("\tUsing Class Specific Coder for: "+classKey);
+						test = aClassifiers[classKey].categorize_list(input_string);
+						console.log("\t\tProjects: "+nProjs);
+						console.log("\t\tCodes: "+training_size);
+						nAvgCodes = training_size/nProjs;
+						// get codes
+						for (var key in nProjectsCodes) 
+						{
+							if (nProjectsCodes.hasOwnProperty(key))
+								arCodes.push(nProjectsCodes[key]);
+						}
+						ci = arCodes.stdDeviation(thold/100.0);
+						console.log("\t\tConfidence Interval for Code Lengths: "+nAvgCodes);
+						nMaxCodes = Math.round(nAvgCodes + ci.upper);
+						nMinCodes = Math.max(Math.round(nAvgCodes - ci.lower),1);
+						console.log("\t\tAvg. Code length: "+nAvgCodes);
+						console.log("\t\tMin. Code length: "+nMinCodes);
+						console.log("\t\tMax. Code length: "+nMaxCodes);
+						aClassifiers[classKey].codelength = nAvgCodes;
+						aClassifiers[classKey].maxcodelength = nMaxCodes;
+						aClassifiers[classKey].mincodelength = nMinCodes;
+						aClassifiers[classKey].usable = true;
+						console.log("\tDone.");
+						nCodeLength = aClassifiers[classKey].codelength;
+					}
+					else
+					{
+						//aClassifiers[classKey] =  null;
+						// check to see if we can use a bigger class
+						if (szClass == 'Donor + Recipient')
+						{
+							classKey = donor;
+							console.log("\tTrying Donor Only Class for: "+classKey);
+							szClass = 'Donor';
+						}
+						else
+						{	
+							console.log("\tUsing Default Classifier for: "+classKey);
+							test = classifier.categorize_list(input_string);
+							bDSClass = true;
+							nCodeLength = classifier.codelength;
+						}
+					}
+					}
+				else
+				{
+					if (aClassifiers[classKey])
+					{
+						if (aClassifiers[classKey].usable)
+						{
+							console.log("\tUsing Class Specific Coder for: "+classKey);
+							test = aClassifiers[classKey].categorize_list(input_string);
+							bDSClass = true;
+							nAvgCodes = aClassifiers[classKey].codelength ;
+							nCodeLength = aClassifiers[classKey].codelength ;
+							nMaxCodes = aClassifiers[classKey].maxcodelength ;
+							nMinCodes = aClassifiers[classKey].mincodelength ;
+					
+						}
+						else
+						{
+							console.log('\tClass Specific Coder is Not usable');
+					
+							if (szClass == 'Donor + Recipient')
+							{
+								classKey = donor;
+								console.log("\tTrying Donor Only Class for: "+classKey);
+								szClass = 'Donor';
+							}
+							else
+							{	
+								console.log("\tUsing Default Classifier for: "+classKey);
+								test = classifier.categorize_list(input_string);
+								bDSClass = true;
+								nCodeLength = classifer.codelength;
+							}
+					
+						}
+					}
+					else
+					{
+						console.log("\tUsing Default Classifier for: "+classKey);
+						test = classifier.categorize_list(input_string);
+						bDSClass = true;
+						nCodeLength = classifier.codelength;
+					}
+				}
+			}
+		
+		
+			//sort by probability
+			test.sort(function(a, b){
+				return b.probability-a.probability
 			});
-	
-			test.sort();
+
+
 			l = test.length;
 			max_p = test[l-1].probability;
 			threshold = max_p/thold;
-    
-    		var ans =[];
-    		for (var y = 0; y < l; y++)
-    		{	
-    	
-    			if (test[y].probability >= (threshold))
-    			{
-    				ans.push(test[y].category);
-    			}
-    		}
-    		res.writeHeader(200, {"Content-Type": "text/json"});
-    		res.write(JSON.stringify(ans));
-    		res.end();
-  		});
-	
-	}).listen(8081);
-	sys.puts("Server Running on 8081");	
+			var ans =[];
+			nCodes = 0;
+		
+			var count = Math.round(nCodeLength);
+			//find the codes we want to use
+			//count = Math.round(nCodeLength);
+			//if ( nCodeLength > nMaxCodes)
+			//{
+			//	count = nMaxCodes;
+			//}
+			//if ( count < nMinCodes)
+			//{
+			//	count = nMinCodes;
+			//}
+		
+		
+			for (var y = 0; y < count; y++)
+			{	
+				if (typeof test[y] != 'undefined')
+				{
+					ans.push(test[y].category);
+					nCodes++;
+				}
+			
+			}
+			res.writeHeader(200, {"Content-Type": "text/json"});
+			res.write(JSON.stringify(ans));
+			res.end();
+		}
+		else
+		{
+			res.writeHeader(200, {"Content-Type": "text/json"});
+			res.write(JSON.stringify("Classifier Not Ready"));
+			res.end();
+		}
+	});
+
+}).listen(8081);
+sys.puts("Server Running on 8081");	
  
 

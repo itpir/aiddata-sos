@@ -51,6 +51,7 @@ csv()
 	//console.log("test");
 	title = data.title;
 	donor = data.donor;
+	recipient = data.recipient;
 	short_description = data.short_description;
 	long_description = data.long_description;
 
@@ -68,7 +69,7 @@ csv()
 
 	var options =
 	{
-    	url: autocoderURL + '?description='+total_desc+'&donor='+donor,
+    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient,
     	codes:  codes,
     	len: total_desc.length
 	};
