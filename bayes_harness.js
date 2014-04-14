@@ -301,8 +301,15 @@ var sys = require("sys");
 							// create the classifier if we dont have it
 							if (findClassifier(hk) < 0) 
 							{
+								var i = aClassifiers.length;
+								
+								//we only keep 50 classifiers in memory
+								if (i > 50)
+								{
+									console.log('Pruning a Classifier');
+									aClassifiers.splice(0, 1);  //remove a Classifier
+								}
 								aClassifiers.push(bayes());
-								var i = aClassifiers.length - 1;
 								aClassifiers[i].hash = hk;
 							}
 							//the index of the classifier to use
