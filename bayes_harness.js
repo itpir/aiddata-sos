@@ -48,6 +48,20 @@ var previous_text = '';
 var bReady = false;
 var thisClassifier = null;
 
+function findClasstoPrune()
+{
+	var retval = -1;
+	mintick = -1;
+	for (var y = 0; y < aClassifiers.length; y++)
+	{
+		if (aClassifiers[y].tick < mintick)
+		{
+			retval = y;
+		}
+	}
+	return retval;
+}
+
 function findClassifier(hk)
 {
 	var retval = -1;
@@ -307,11 +321,14 @@ var sys = require("sys");
 								if (i > 50)
 								{
 									console.log('Pruning a Classifier');
-									aClassifiers.splice(0, 1);  //remove a Classifier
+									var x = findClasstoPrune();
+									aClassifiers.splice(x, 1);  //remove the least used Classifier
 								}
 								aClassifiers.push(bayes());
 								i = aClassifiers.length;
 								aClassifiers[i-1].hash = hk;
+								aClassifiers[i-1].tick = 0;
+								
 							}
 							//the index of the classifier to use
 							var i = findClassifier(hk);
@@ -340,6 +357,7 @@ var sys = require("sys");
 							aClassifiers[i].training_size = thisData.length
 							aClassifiers[i].nProjectsCodes = nProjectsCodes;
 							thisClassifier = aClassifiers[i];
+							aClassifiers[i].tick++;
 						}
 						else
 						{
@@ -354,6 +372,7 @@ var sys = require("sys");
 								{
 									console.log("\Classifier Exists For: "+classKey);	
 									thisClassifier = aClassifiers[t];
+									aClassifiers[t].tick++;
 								}
 								else
 								{
