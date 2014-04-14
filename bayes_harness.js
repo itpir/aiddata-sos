@@ -310,7 +310,8 @@ var sys = require("sys");
 									aClassifiers.splice(0, 1);  //remove a Classifier
 								}
 								aClassifiers.push(bayes());
-								aClassifiers[i].hash = hk;
+								i = aClassifiers.length;
+								aClassifiers[i-1].hash = hk;
 							}
 							//the index of the classifier to use
 							var i = findClassifier(hk);
