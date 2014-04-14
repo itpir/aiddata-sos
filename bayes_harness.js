@@ -1,7 +1,8 @@
 var csv = require('csv');
 var url = require('url');
 var S = require('string');
-var StatsArray = require('stats-array')
+var StatsArray = require('stats-array');
+var md5 = require('MD5');
 
 
 var header = true;
@@ -45,7 +46,21 @@ var total_count = 0;
 var training_data = [];
 var previous_text = '';
 var bReady = false;
+var thisClassifier = null;
 
+function findClassifier(hk)
+{
+	var retval = -1;
+	for (var y = 0; y < aClassifiers.length; y++)
+	{
+		if (aClassifiers[y].hash == hk)
+		{
+			retval = y;
+			break;
+		}
+	}
+	return retval;
+}
 
 function cleanText (text)
 {
@@ -54,6 +69,26 @@ function cleanText (text)
  	text = text.toLowerCase(text);
  	
  	return text;
+}
+
+function filterClass (szClass,classKey)
+{
+	return function(element) {
+		//set key
+		if (szClass == 'Donor + Recipient')
+		{
+			thisKey = element.donorrcptmd5; 
+		} 
+		else  if (szClass == 'Donor') 
+		{
+			thisKey =  element.donormd5;
+		}
+		else  if (szClass == 'Recipient') 
+		{
+			thisKey =  element.recipientmd5;
+		}
+		return (thisKey == classKey);
+    }
 }
 
 csv()
@@ -95,9 +130,7 @@ csv()
     	    if (key == 'act_code')
     	    {
     	    	act_code = (data[key]);
-    	     	super_sector = act_code.substr(0,1);
-    	     	sector = act_code.substr(0,3);
-    	     	
+    	     
     		}
     	    if (key == 'org')
     	    {
@@ -135,11 +168,12 @@ csv()
  	
  		var rec = {
     		act_code: act_code,
-    		sector: sector,
     		donor: donor,
+    		donormd5 : md5(donor),
+    		recipientmd5: md5(recipient),
+    		donorrcptmd5: md5 (donor+recipient),
     		project_id : project_id,
     		recipient: recipient,
-    		super_sector: super_sector,
     		text : strRow
 		}
 
@@ -198,6 +232,9 @@ csv()
 			nProjectsCodes[training_data[y].project_id]++;
 		}
 	}
+	classifier.numProjects = nProjs;
+	classifier.training_size = training_data.length;
+	classifier.nProjectsCodes = nProjectsCodes;
 	classifier.codelength = Math.round(count/nProjs);
 	console.log("Done Training: Total Records: "+count);
  	
@@ -213,23 +250,26 @@ var sys = require("sys");
 	my_http.createServer(function(req,res){
 	
 		var body = "";
-		//var classifier_0 = bayes();
   		req.on('data', function (chunk) {
     		body += chunk;
   		});
   		
   		//parse the input string, get text, sector, donor and recipient
   		var queryData = url.parse(req.url, true).query;
-  		input_string = queryData.description;
-  		sector = queryData.sector;
-  		donor = queryData.donor;
-  		recipient = queryData.recipient;
-  		var bDSClass = false;
+  		input_string = queryData.description;				//get the text to classify from the querystring
+  		sector = queryData.sector;							//get the sector data from the querystring
+  		donor = queryData.donor;							//get the donor data from the querystring
+  		recipient = queryData.recipient;					// get the recipient data from the querystring
+  		
+  		//handle request
   		req.on('end', function () {
     		
+    		//answer array
+    		var ans =[];
+    		
+    		//check to see if the classifier is ready (has read all the training input)
     		if (bReady)
     		{
-				var len = input_string.length;
 				var test;
 				var szClass = 'Donor + Recipient';
 				var classKey =  donor + recipient;
@@ -237,217 +277,154 @@ var sys = require("sys");
 				var nProjectsCodes = [];
 				var training_size = 0;
 				var nProjs = 0;
-				bDSClass = false;
-			
-				while (!bDSClass)
+				thisClassifier = null;
+				var thisData;
+				
+				while (!thisClassifier)
 				{
-				
-					//if we dont already have a classifier for this class
-				
-					if (!(classKey  in aClassifiers))
+					//the key is hashing the class (donor,etc)
+					var hk = md5(classKey);
+
+					//if we dont already have a classifier for this class-- 
+					if (findClassifier(hk) < 0)
 					{
 						console.log("\tCreating Class Specific Coder for: "+classKey);
-						doc = 0;	
-						var tfidf_spec = new TfIdf();
-						previous_text = '';
-					
-						//count training size
-						for (var y = 0; y < training_data.length; y++)
-						{
-							//set key
-							if (szClass == 'Donor + Recipient')
-							{
-								thisKey =  training_data[y].donor +training_data[y].recipient;
-							}
-							else  if (szClass == 'Donor') 
-							{
-								thisKey =  training_data[y].donor;
-							}
-							if (thisKey == classKey)
-							{
-								training_size++;
-							}
 						
-						}
+						//count training size
+						thisData = training_data.filter(filterClass(szClass,md5(classKey)));
+						training_size = thisData.length;
+								
 					
+						//check to see if we have enough activity codes to attempt classification with
 						if (training_size > nCodesThreshold)
 						{
-							for (var y = 0; y < training_data.length; y++)
+							// create the classifier if we dont have it
+							if (findClassifier(hk) < 0) 
 							{
-								//set key
-								if (szClass == 'Donor + Recipient')
-								{
-									thisKey =  training_data[y].donor +training_data[y].recipient;
-								}
-								else  if (szClass == 'Donor') 
-								{
-									thisKey =  training_data[y].donor;
-								}
-								if (thisKey == classKey)
-								{
-									// create the classifier
-									if (!aClassifiers[classKey]) 
-									{
-										aClassifiers[classKey] = bayes();
-									}
-									// keep track of codes per project
-									if (!nProjectsCodes[training_data[y].project_id])
-									{
-										nProjectsCodes[training_data[y].project_id] = 1;
-										nProjs  = nProjs + 1;
-				
-									}
-									else
-									{
-										nProjectsCodes[training_data[y].project_id]++;
-									}
-						
-									//learn the project/codes
-									var text =  training_data[y].text;			
-									aClassifiers[classKey].learn(text,  training_data[y].act_code);
-									bDSClass = true;
-								}	
+								aClassifiers.push(bayes());
+								var i = aClassifiers.length - 1;
+								aClassifiers[i].hash = hk;
 							}
-						}
-				
-					//if we have a good class to attempt classification with
-					if (bDSClass)
-					{
-						var arCodes = [];
-						console.log("\tUsing Class Specific Coder for: "+classKey);
-						test = aClassifiers[classKey].categorize_list(input_string);
-						console.log("\t\tProjects: "+nProjs);
-						console.log("\t\tCodes: "+training_size);
-						nAvgCodes = training_size/nProjs;
-						// get codes
-						for (var key in nProjectsCodes) 
-						{
-							if (nProjectsCodes.hasOwnProperty(key))
-								arCodes.push(nProjectsCodes[key]);
-						}
-						ci = arCodes.stdDeviation(thold/100.0);
-						console.log("\t\tConfidence Interval for Code Lengths: "+nAvgCodes);
-						nMaxCodes = Math.round(nAvgCodes + ci.upper);
-						nMinCodes = Math.max(Math.round(nAvgCodes - ci.lower),1);
-						console.log("\t\tAvg. Code length: "+nAvgCodes);
-						console.log("\t\tMin. Code length: "+nMinCodes);
-						console.log("\t\tMax. Code length: "+nMaxCodes);
-						aClassifiers[classKey].codelength = nAvgCodes;
-						aClassifiers[classKey].maxcodelength = nMaxCodes;
-						aClassifiers[classKey].mincodelength = nMinCodes;
-						aClassifiers[classKey].usable = true;
-						console.log("\tDone.");
-						nCodeLength = aClassifiers[classKey].codelength;
-					}
-					else
-					{
-						//aClassifiers[classKey] =  null;
-						// check to see if we can use a bigger class
-						if (szClass == 'Donor + Recipient')
-						{
-							classKey = donor;
-							console.log("\tTrying Donor Only Class for: "+classKey);
-							szClass = 'Donor';
-						}
-						else
-						{	
-							console.log("\tUsing Default Classifier for: "+classKey);
-							test = classifier.categorize_list(input_string);
-							bDSClass = true;
-							nCodeLength = classifier.codelength;
-						}
-					}
-					}
-				else
-				{
-					if (aClassifiers[classKey])
-					{
-						if (aClassifiers[classKey].usable)
-						{
-							console.log("\tUsing Class Specific Coder for: "+classKey);
-							test = aClassifiers[classKey].categorize_list(input_string);
-							bDSClass = true;
-							nAvgCodes = aClassifiers[classKey].codelength ;
-							nCodeLength = aClassifiers[classKey].codelength ;
-							nMaxCodes = aClassifiers[classKey].maxcodelength ;
-							nMinCodes = aClassifiers[classKey].mincodelength ;
+							//the index of the classifier to use
+							var i = findClassifier(hk);
+							
+							for (var y = 0; y < thisData.length; y++)
+							{
+								
+								// keep track of codes per project
+								if (!nProjectsCodes[thisData[y].project_id])
+								{
+									nProjectsCodes[thisData[y].project_id] = 1;
+									nProjs  = nProjs + 1;
+			
+								}
+								else
+								{
+									nProjectsCodes[thisData[y].project_id]++;
+								}
 					
+								//learn the project/codes
+								var text =  thisData[y].text;	
+								aClassifiers[i].learn(text,  thisData[y].act_code);
+							
+							}
+							aClassifiers[i].numProjects = nProjs;
+							aClassifiers[i].training_size = thisData.length
+							aClassifiers[i].nProjectsCodes = nProjectsCodes;
+							thisClassifier = aClassifiers[i];
 						}
 						else
 						{
-							console.log('\tClass Specific Coder is Not usable');
-					
+							console.log("\tNot enough codes for: "+classKey+". Needed "+nCodesThreshold+", got "+training_size);
 							if (szClass == 'Donor + Recipient')
 							{
 								classKey = donor;
 								console.log("\tTrying Donor Only Class for: "+classKey);
 								szClass = 'Donor';
+								var t =  findClassifier(hk);
+								if (t >= 0)
+								{
+									console.log("\Classifier Exists For: "+classKey);	
+									thisClassifier = aClassifiers[t];
+								}
+								else
+								{
+									console.log("\tMust Create Classifier for: "+classKey);	
+								}
+								
 							}
 							else
 							{	
 								console.log("\tUsing Default Classifier for: "+classKey);
 								test = classifier.categorize_list(input_string);
-								bDSClass = true;
-								nCodeLength = classifer.codelength;
+								thisClassifier = classifier;
 							}
-					
 						}
 					}
 					else
 					{
-						console.log("\tUsing Default Classifier for: "+classKey);
-						test = classifier.categorize_list(input_string);
-						bDSClass = true;
-						nCodeLength = classifier.codelength;
+						thisClassifier = aClassifiers[findClassifier(hk)];
 					}
 				}
-			}
-		
-		
-			//sort by probability
-			test.sort(function(a, b){
-				return b.probability-a.probability
-			});
-
-
-			l = test.length;
-			max_p = test[l-1].probability;
-			threshold = max_p/thold;
-			var ans =[];
-			nCodes = 0;
-		
-			var count = Math.round(nCodeLength);
-			//find the codes we want to use
-			//count = Math.round(nCodeLength);
-			//if ( nCodeLength > nMaxCodes)
-			//{
-			//	count = nMaxCodes;
-			//}
-			//if ( count < nMinCodes)
-			//{
-			//	count = nMinCodes;
-			//}
-		
-		
-			for (var y = 0; y < count; y++)
-			{	
-				if (typeof test[y] != 'undefined')
+				//if we have a good class to attempt classification with
+				if (thisClassifier)
 				{
-					ans.push(test[y].category);
-					nCodes++;
-				}
+					var arCodes = [];
+					test = thisClassifier.categorize_list(input_string);
+					console.log("\t\tProjects: "+thisClassifier.numProjects);
+					console.log("\t\tCodes: "+thisClassifier.training_size);
+					nAvgCodes = thisClassifier.training_size/thisClassifier.numProjects;
+					// get codes
+					for (var key in thisClassifier.nProjectsCodes) 
+					{
+						if (thisClassifier.nProjectsCodes.hasOwnProperty(key))
+							arCodes.push(thisClassifier.nProjectsCodes[key]);
+					}
+					ci = arCodes.stdDeviation(thold/100.0);
+					console.log("\t\tConfidence Interval for Code Lengths: "+nAvgCodes);
+					nMaxCodes = Math.round(nAvgCodes + ci.upper);
+					nMinCodes = Math.max(Math.round(nAvgCodes - ci.lower),1);
+					console.log("\t\tAvg. Code length: "+nAvgCodes);
+					console.log("\t\tMin. Code length: "+nMinCodes);
+					console.log("\t\tMax. Code length: "+nMaxCodes);
+					thisClassifier.codelength = nAvgCodes;
+					thisClassifier.maxcodelength = nMaxCodes;
+					thisClassifier.mincodelength = nMinCodes;
+					
+					console.log("\tUsing A Classifier For: "+classKey);
+					test = thisClassifier.categorize_list(input_string);
+					nAvgCodes = thisClassifier.codelength ;
+					nCodeLength = thisClassifier.codelength ;
+					nMaxCodes = thisClassifier.maxcodelength ;
+					nMinCodes = thisClassifier.mincodelength ;
+
+					//sort by probability
+					test.sort(function(a, b){
+						return b.probability-a.probability
+					});
+
+					// get length of codes to report out TODO: this needs work, its only the average	
+					var count = Math.round(nCodeLength);
+		
+					for (var y = 0; y < count; y++)
+					{	
+						if (typeof test[y] != 'undefined')
+						{
+							ans.push(test[y].category);
+							nCodes++;
+						}
 			
+					}
+				}
+				
+			}
+			else
+			{
+				ans = "Classifier Not Ready; still training";
 			}
 			res.writeHeader(200, {"Content-Type": "text/json"});
 			res.write(JSON.stringify(ans));
 			res.end();
-		}
-		else
-		{
-			res.writeHeader(200, {"Content-Type": "text/json"});
-			res.write(JSON.stringify("Classifier Not Ready"));
-			res.end();
-		}
 	});
 
 }).listen(8081);
