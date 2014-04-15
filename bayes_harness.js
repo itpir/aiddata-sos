@@ -48,18 +48,18 @@ var previous_text = '';
 var bReady = false;
 var thisClassifier = null;
 
-function findClasstoPrune()
+function findClasstoPrune(arClassifiers, newClass)
 {
-	var retval = -1;
-	mintick = -1;
-	for (var y = 0; y < aClassifiers.length; y++)
+	//if we have more than 100 classifiers in memory, pop off the oldest
+	var l = arClassifiers.length;
+	if ( l > 100 && l > 0)
 	{
-		if (aClassifiers[y].tick < mintick)
-		{
-			retval = y;
-		}
+		arClassifiers.splice (0,1);
 	}
-	return retval;
+	//...and push on the new one
+	arClassifiers.push(newClass);
+	return arClassifiers;
+	
 }
 
 function findClassifier(hk)
@@ -314,20 +314,15 @@ var sys = require("sys");
 						{
 							// create the classifier if we dont have it
 							if (findClassifier(hk) < 0) 
-							{
+							{ 
 								var i = aClassifiers.length;
 								
-								//we only keep 50 classifiers in memory
-								if (i > 50)
-								{
-									console.log('Pruning a Classifier');
-									var x = findClasstoPrune();
-									aClassifiers.splice(x, 1);  //remove the least used Classifier
-								}
-								aClassifiers.push(bayes());
+								//LRU the list of classifiers
+								aClassifiers = findClasstoPrune(aClassifiers,bayes());
+								
+								//we pushed it onto the end
 								i = aClassifiers.length;
 								aClassifiers[i-1].hash = hk;
-								aClassifiers[i-1].tick = 0;
 								
 							}
 							//the index of the classifier to use
@@ -357,7 +352,7 @@ var sys = require("sys");
 							aClassifiers[i].training_size = thisData.length
 							aClassifiers[i].nProjectsCodes = nProjectsCodes;
 							thisClassifier = aClassifiers[i];
-							aClassifiers[i].tick++;
+							
 						}
 						else
 						{
@@ -372,7 +367,6 @@ var sys = require("sys");
 								{
 									console.log("\Classifier Exists For: "+classKey);	
 									thisClassifier = aClassifiers[t];
-									aClassifiers[t].tick++;
 								}
 								else
 								{
@@ -408,7 +402,6 @@ var sys = require("sys");
 							arCodes.push(thisClassifier.nProjectsCodes[key]);
 					}
 					ci = arCodes.stdDeviation(thold/100.0);
-					console.log("\t\tConfidence Interval for Code Lengths: "+nAvgCodes);
 					nMaxCodes = Math.round(nAvgCodes + ci.upper);
 					nMinCodes = Math.max(Math.round(nAvgCodes - ci.lower),1);
 					console.log("\t\tAvg. Code length: "+nAvgCodes);
@@ -447,7 +440,7 @@ var sys = require("sys");
 			}
 			else
 			{
-				ans = "Classifier Not Ready; still training";
+				ans = "Engine Not Ready; still training";
 			}
 			res.writeHeader(200, {"Content-Type": "text/json"});
 			res.write(JSON.stringify(ans));
