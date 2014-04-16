@@ -313,7 +313,8 @@ var sys = require("sys");
 						if (training_size > nCodesThreshold)
 						{
 							// create the classifier if we dont have it
-							if (findClassifier(hk) < 0) 
+							var indexOf = findClassifier(hk);
+							if (indexOf < 0) 
 							{ 
 								var i = aClassifiers.length;
 								
@@ -325,6 +326,13 @@ var sys = require("sys");
 								aClassifiers[i-1].hash = hk;
 								
 							}
+							else
+							{
+								//if we have it cached, touch it to move it to the LRU
+								touchedClass= aClassifiers.splice(indexOf,1);
+								aClassifiers.push(touchedClass);
+							}
+							
 							//the index of the classifier to use
 							var i = findClassifier(hk);
 							

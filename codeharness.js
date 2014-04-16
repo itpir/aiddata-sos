@@ -16,6 +16,8 @@ var stoponerror = process.argv[4]; 	//get the stoponerror from the command line
 var totalScore = 0;
 var possTotal = 0;
 var doc = 0;
+var start = +new Date();  // log start timestamp
+
 
 process.stdout.write("human_codes\trobo_codes\tdoc_length\tround_score\tpossible_score\trunning_total_possible\trunning_total_score\tpercent_of_possible\r\n");
     
@@ -65,6 +67,8 @@ csv()
 	var codes = data.aiddata_activity_code.split("|");
 	codes = codes.map(function (val) { return val; });
 	
+
+
 
 
 	var options =
@@ -121,4 +125,16 @@ csv()
 	}
 	
 	request(options, callback);
+})
+
+
+.on('end', function(count){
+  
+   var end =  +new Date();  // log end timestamp
+   var diff = end - start;
+   
+   diff = diff/1000.0;
+   console.log("Took "+diff+ " seconds to read "+count+" records.");
+
+ 	
 });
