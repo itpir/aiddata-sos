@@ -48,17 +48,64 @@ var previous_text = '';
 var bReady = false;
 var thisClassifier = null;
 
-function findClasstoPrune(arClassifiers, newClass)
+function everybodyVotes(classVoters,bordaCount)
+{
+	
+	//init the vote counts and ranking
+	for (var v = 0; v < classVoters.length; v++)
+	{
+		//sort them by probability
+		classVoters[v].sort(function(a, b){
+			return b.probability-a.probability
+		});
+								
+		var l = classVoters[v].length;
+		for (var t = 0; (t < l) ; t++)
+		{	
+			classVoters[v][t].vote = -1;
+			
+			if (t < bordaCount)
+			{
+				classVoters[v][t].vote = bordaCount - t;
+			}
+		}
+		
+	}
+	
+	for (var v = 1; v < classVoters.length; v++)
+	{
+		var l = classVoters[v].length;
+		var l2 = classVoters[v-1].length;
+		for (var t = 0; (t < l && t < bordaCount); t++)
+		{	
+			for (var p = 0; (p < l2 && p < bordaCount); p++)
+			{
+				if (classVoters[v-1][p].category == classVoters[v][t].category)
+				{
+					classVoters[v][t].vote += classVoters[v-1][p].vote;
+				}
+			}
+		}	
+	}
+			
+	//sort by voting; final values will be in last voter
+	classVoters[classVoters.length-1].sort(function(a, b){
+		return b.vote-a.vote;
+	});
+	return classVoters[classVoters.length-1];
+}
+
+function findClasstoPrune(newClass)
 {
 	//if we have more than 100 classifiers in memory, pop off the oldest
-	var l = arClassifiers.length;
+	var l = aClassifiers.length;
 	if ( l > 100 && l > 0)
 	{
-		arClassifiers.splice (0,1);
+		console.log("Pruning: "+aClassifiers[0].hash);
+		aClassifiers.splice (0,1);
 	}
 	//...and push on the new one
-	arClassifiers.push(newClass);
-	return arClassifiers;
+	aClassifiers.push(newClass);
 	
 }
 
@@ -67,7 +114,7 @@ function findClassifier(hk)
 	var retval = -1;
 	for (var y = 0; y < aClassifiers.length; y++)
 	{
-		if (aClassifiers[y].hash == hk)
+		if (aClassifiers[y].hash.localeCompare(hk) == 0)
 		{
 			retval = y;
 			break;
@@ -141,22 +188,23 @@ csv()
  		for (key in data)
     	{	
     		var rec;
+    		data[key] = data[key].trim();
     	    if (key == 'act_code')
     	    {
-    	    	act_code = (data[key]);
+    	    	act_code = data[key];
     	     
     		}
     	    if (key == 'org')
     	    {
-    	    	donor = (data[key]);
+    	    	donor = data[key];
     	    }
     	     if (key == 'project_id')
     	    {
-    	    	project_id = (data[key]);
+    	    	project_id = data[key];
     	    }
     	    if (key == 'recipient')
     	    {
-    	    	recipient = (data[key]);
+    	    	recipient = data[key];
     	    }
     	    if (key == 'title') 
     	    {
@@ -316,22 +364,18 @@ var sys = require("sys");
 							var indexOf = findClassifier(hk);
 							if (indexOf < 0) 
 							{ 
+								console.log("\tNot Found, must create for: "+classKey);
 								var i = aClassifiers.length;
 								
 								//LRU the list of classifiers
-								aClassifiers = findClasstoPrune(aClassifiers,bayes());
+								findClasstoPrune(bayes());
 								
 								//we pushed it onto the end
 								i = aClassifiers.length;
 								aClassifiers[i-1].hash = hk;
 								
 							}
-							else
-							{
-								//if we have it cached, touch it to move it to the LRU
-								touchedClass= aClassifiers.splice(indexOf,1);
-								aClassifiers.push(touchedClass);
-							}
+							
 							
 							//the index of the classifier to use
 							var i = findClassifier(hk);
@@ -392,7 +436,14 @@ var sys = require("sys");
 					}
 					else
 					{
-						thisClassifier = aClassifiers[findClassifier(hk)];
+						
+						//if we have it cached, touch it to move it to the LRU
+						console.log("\tUsing Cached copy for: "+classKey);
+						touchedClass = aClassifiers[findClassifier(hk)];
+						aClassifiers.splice(findClassifier(hk),1);
+						aClassifiers.push(touchedClass);
+						
+						thisClassifier = aClassifiers[aClassifiers.length-1];
 					}
 				}
 				//if we have a good class to attempt classification with
@@ -421,24 +472,27 @@ var sys = require("sys");
 					
 					console.log("\tUsing A Classifier For: "+classKey);
 					test = thisClassifier.categorize_list(input_string);
+					test2 = classifier.categorize_list(input_string);
 					nAvgCodes = thisClassifier.codelength ;
 					nCodeLength = thisClassifier.codelength ;
 					nMaxCodes = thisClassifier.maxcodelength ;
 					nMinCodes = thisClassifier.mincodelength ;
 
-					//sort by probability
-					test.sort(function(a, b){
-						return b.probability-a.probability
-					});
-
+					var classVoters = [];
+					
+					classVoters.push(test);
+					classVoters.push(test2);
+					
+					var votes = everybodyVotes(classVoters, 10);
+					
 					// get length of codes to report out TODO: this needs work, its only the average	
 					var count = Math.round(nCodeLength);
 		
 					for (var y = 0; y < count; y++)
 					{	
-						if (typeof test[y] != 'undefined')
+						if (typeof votes[y] != 'undefined')
 						{
-							ans.push(test[y].category);
+							ans.push(votes[y].category);
 							nCodes++;
 						}
 			
