@@ -46,9 +46,66 @@ var total_count = 0;
 var training_data = [];
 var previous_text = '';
 var bReady = false;
-var thisClassifier = null;
 
-function everybodyVotes(classVoters,bordaCount)
+function getCodes(votes)
+{
+	var ans = [];
+	l = votes.length;
+	max_p = votes[0].vote;
+	threshold = max_p*thold;
+
+	for (var y = 0; y < l; y++)
+	{	
+		console.log(votes[y].vote+" "+threshold+" "+thold);
+		if (typeof votes[y] != 'undefined' && votes[y].vote > threshold)
+		{
+			ans.push(votes[y].category);
+		}
+	}
+	return ans;
+
+}
+
+function findCodeLength(theseClassifiers)
+{
+	var nSumCodes = 0;
+	for (var g = 0; g < theseClassifiers.length; g++)
+	{
+		thisClassifier = theseClassifiers[g];
+		nSumCodes = 0;
+		var arCodes = [];
+		if (thisClassifier.training_size >0 && thisClassifier.numProjects > 0)
+		{
+			nCodeLength = thisClassifier.training_size/thisClassifier.numProjects;
+			for (var key in thisClassifier.nProjectsCodes) 
+			{
+				if (thisClassifier.nProjectsCodes.hasOwnProperty(key))
+					arCodes.push(thisClassifier.nProjectsCodes[key]);
+			}
+			ci = arCodes.stdDeviation(thold/100.0);
+			nMaxCodes = Math.round(nCodeLength + ci.upper);
+			nMinCodes = Math.max(Math.round(nCodeLength - ci.lower),1);
+			thisClassifier.codelength = nCodeLength;
+			thisClassifier.maxcodelength = nMaxCodes;
+			thisClassifier.mincodelength = nMinCodes;
+			nSumCodes += nCodeLength;
+		}
+		else
+		{
+			nSumCodes += 0;
+		}
+	}
+	if (theseClassifiers.length > 0)
+	{
+		return Math.max(nSumCodes/theseClassifiers.length,1);
+	}
+	else
+	{
+		return 1;
+	}
+}
+
+function everybodyVotes(classVoters)
 {
 	
 	//init the vote counts and ranking
@@ -62,12 +119,7 @@ function everybodyVotes(classVoters,bordaCount)
 		var l = classVoters[v].length;
 		for (var t = 0; (t < l) ; t++)
 		{	
-			classVoters[v][t].vote = -1;
-			
-			if (t < bordaCount)
-			{
-				classVoters[v][t].vote = bordaCount - t;
-			}
+			classVoters[v][t].vote =  (100)/Math.abs(classVoters[v][t].probability);
 		}
 		
 	}
@@ -76,9 +128,9 @@ function everybodyVotes(classVoters,bordaCount)
 	{
 		var l = classVoters[v].length;
 		var l2 = classVoters[v-1].length;
-		for (var t = 0; (t < l && t < bordaCount); t++)
+		for (var t = 0; (t < l ); t++)
 		{	
-			for (var p = 0; (p < l2 && p < bordaCount); p++)
+			for (var p = 0; (p < l2 ); p++)
 			{
 				if (classVoters[v-1][p].category == classVoters[v][t].category)
 				{
@@ -92,6 +144,7 @@ function everybodyVotes(classVoters,bordaCount)
 	classVoters[classVoters.length-1].sort(function(a, b){
 		return b.vote-a.vote;
 	});
+	
 	return classVoters[classVoters.length-1];
 }
 
@@ -191,8 +244,7 @@ csv()
     		data[key] = data[key].trim();
     	    if (key == 'act_code')
     	    {
-    	    	act_code = data[key];
-    	     
+		    	act_code = data[key];    
     		}
     	    if (key == 'org')
     	    {
@@ -329,20 +381,22 @@ var sys = require("sys");
     		//answer array
     		var ans =[];
     		
+    		
     		//check to see if the classifier is ready (has read all the training input)
     		if (bReady)
     		{
-				var test;
+				var test = null;
 				var szClass = 'Donor + Recipient';
 				var classKey =  donor + recipient;
 				var nCodes = 0;
 				var nProjectsCodes = [];
 				var training_size = 0;
 				var nProjs = 0;
-				thisClassifier = null;
 				var thisData;
+				var theseClassifiers = [];
+				var bFinished = false;
 				
-				while (!thisClassifier)
+				while (!bFinished)
 				{
 					//the key is hashing the class (donor,etc)
 					var hk = md5(classKey);
@@ -355,8 +409,7 @@ var sys = require("sys");
 						//count training size
 						thisData = training_data.filter(filterClass(szClass,md5(classKey)));
 						training_size = thisData.length;
-								
-					
+						
 						//check to see if we have enough activity codes to attempt classification with
 						if (training_size > nCodesThreshold)
 						{
@@ -375,8 +428,7 @@ var sys = require("sys");
 								aClassifiers[i-1].hash = hk;
 								
 							}
-							
-							
+								
 							//the index of the classifier to use
 							var i = findClassifier(hk);
 							
@@ -403,102 +455,104 @@ var sys = require("sys");
 							aClassifiers[i].numProjects = nProjs;
 							aClassifiers[i].training_size = thisData.length
 							aClassifiers[i].nProjectsCodes = nProjectsCodes;
-							thisClassifier = aClassifiers[i];
+							theseClassifiers.push(aClassifiers[i]);
 							
 						}
 						else
 						{
 							console.log("\tNot enough codes for: "+classKey+". Needed "+nCodesThreshold+", got "+training_size);
-							if (szClass == 'Donor + Recipient')
+						}
+						
+						//try all class types
+						if (szClass == 'Donor + Recipient')
+						{
+							classKey = donor;
+							console.log("\tTrying Donor Only Class for: "+classKey);
+							szClass = 'Donor';
+							var t =  findClassifier(hk);
+							if (t >= 0)
 							{
-								classKey = donor;
-								console.log("\tTrying Donor Only Class for: "+classKey);
-								szClass = 'Donor';
-								var t =  findClassifier(hk);
-								if (t >= 0)
-								{
-									console.log("\Classifier Exists For: "+classKey);	
-									thisClassifier = aClassifiers[t];
-								}
-								else
-								{
-									console.log("\tMust Create Classifier for: "+classKey);	
-								}
-								
+								console.log("\Classifier Exists For: "+classKey);
+								theseClassifiers.push(aClassifiers[t]);		
 							}
 							else
-							{	
-								console.log("\tUsing Default Classifier for: "+classKey);
-								test = classifier.categorize_list(input_string);
-								thisClassifier = classifier;
+							{
+								console.log("\tMust Create Classifier for: "+classKey);	
+							}
+							
+						}
+						else if (szClass == 'Donor')
+						{
+							classKey = recipient;
+							console.log("\tTrying Recipient Only Class for: "+classKey);
+							szClass = 'Recipient';
+							var t =  findClassifier(hk);
+							if (t >= 0)
+							{
+								console.log("\Classifier Exists For: "+classKey);
+								theseClassifiers.push(aClassifiers[t]);	
+							}
+							else
+							{
+								console.log("\tMust Create Classifier for: "+classKey);	
 							}
 						}
+						else
+						{	
+							bFinished = true;			
+						}
+			
 					}
 					else
-					{
-						
+					{				
 						//if we have it cached, touch it to move it to the LRU
 						console.log("\tUsing Cached copy for: "+classKey);
 						touchedClass = aClassifiers[findClassifier(hk)];
 						aClassifiers.splice(findClassifier(hk),1);
 						aClassifiers.push(touchedClass);
 						
-						thisClassifier = aClassifiers[aClassifiers.length-1];
+						//TODO: hack!!!
+						if (szClass == "Donor + Recipient")
+						{
+							szClass = "Donor";
+						}
+						if (szClass == "Donor")
+						{
+							szClass = "Recipient";
+						}	
+						if (szClass == "Recipient")
+						{
+							bFinished = true;
+						}				
+						theseClassifiers.push(aClassifiers[aClassifiers.length-1]);	
 					}
 				}
-				//if we have a good class to attempt classification with
-				if (thisClassifier)
+				//if we have all of our good classes to attempt classification with
+				if (bFinished)
 				{
-					var arCodes = [];
-					test = thisClassifier.categorize_list(input_string);
-					console.log("\t\tProjects: "+thisClassifier.numProjects);
-					console.log("\t\tCodes: "+thisClassifier.training_size);
-					nAvgCodes = thisClassifier.training_size/thisClassifier.numProjects;
-					// get codes
-					for (var key in thisClassifier.nProjectsCodes) 
-					{
-						if (thisClassifier.nProjectsCodes.hasOwnProperty(key))
-							arCodes.push(thisClassifier.nProjectsCodes[key]);
-					}
-					ci = arCodes.stdDeviation(thold/100.0);
-					nMaxCodes = Math.round(nAvgCodes + ci.upper);
-					nMinCodes = Math.max(Math.round(nAvgCodes - ci.lower),1);
-					console.log("\t\tAvg. Code length: "+nAvgCodes);
-					console.log("\t\tMin. Code length: "+nMinCodes);
-					console.log("\t\tMax. Code length: "+nMaxCodes);
-					thisClassifier.codelength = nAvgCodes;
-					thisClassifier.maxcodelength = nMaxCodes;
-					thisClassifier.mincodelength = nMinCodes;
 					
-					console.log("\tUsing A Classifier For: "+classKey);
-					test = thisClassifier.categorize_list(input_string);
-					test2 = classifier.categorize_list(input_string);
-					nAvgCodes = thisClassifier.codelength ;
-					nCodeLength = thisClassifier.codelength ;
-					nMaxCodes = thisClassifier.maxcodelength ;
-					nMinCodes = thisClassifier.mincodelength ;
-
+		
 					var classVoters = [];
 					
-					classVoters.push(test);
-					classVoters.push(test2);
-					
-					var votes = everybodyVotes(classVoters, 10);
-					
-					// get length of codes to report out TODO: this needs work, its only the average	
-					var count = Math.round(nCodeLength);
-		
-					for (var y = 0; y < count; y++)
-					{	
-						if (typeof votes[y] != 'undefined')
-						{
-							ans.push(votes[y].category);
-							nCodes++;
-						}
-			
+					for (var r = 0; r < theseClassifiers.length; r++)
+					{
+						test = theseClassifiers[r].categorize_list(input_string);
+						classVoters.push(test);
 					}
-				}
-				
+					
+					//use default only as last resort
+					if (theseClassifiers.length == 0)
+					{
+						test = classifier.categorize_list(input_string);
+						classVoters.push(test);
+					}
+					
+					var votes = everybodyVotes(classVoters);
+					
+					// get codes to report out , based upon the threshold value
+					ans = getCodes(votes);
+						
+				}	
 			}
 			else
 			{
