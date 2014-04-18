@@ -1,10 +1,8 @@
 var csv = require('csv');
 var url = require('url');
 var S = require('string');
+var StatsArray = require('stats-array');
 var md5 = require('MD5');
-var ss = require('simple-statistics');
-var bayes = require('bayes');
-var natural = require('natural');
 
 
 var header = true;
@@ -15,9 +13,9 @@ GET THE COMMAND LINE VARS
 /* get the training file name from command line */
 var csvfile = process.argv[2];
 
-/*get the threshold value. This is the modified Z-score threshold to test against for inclusion, 
-recommended value is 3.5 */			
-var thold = process.argv[3]; 		
+/*get the threshold value. This is the percentile activity codes from the Bayes Classifier we want 
+for example, 97 as a value here means give me the top 3%. */			
+var thold = process.argv[3]/100; 		
 
 /*get the token count for TF*IDF. This is the value to limit of TF*IDF tokens to use as classifier trainers*/
 var tokcount = process.argv[4];
@@ -33,9 +31,11 @@ var nCodesThreshold = process.argv[7];
 
 
 // init classifiers and TF*IDF
+var natural = require('natural');
 var TfIdf = natural.TfIdf;
 var tfidf = new TfIdf();
 
+var bayes = require('bayes');
 var classifier = bayes();      //the general purpose classifier
 var aClassifiers = [];
 
@@ -47,55 +47,20 @@ var training_data = [];
 var previous_text = '';
 var bReady = false;
 
-function getMad(votes)
-{
-	var ar = [];
-	for (var y = 0;  y < Math.min(votes.length,30); y++)
-	{
-		ar.push(votes[y].vote);
-	}
-	var mad = ss.mad(ar);
-	return mad;
-}
-
-function getMedian(votes)
-{
-	var ar = [];
-	for (var y = 0; y < Math.min(votes.length,30); y++)
-	{
-		ar.push(votes[y].vote);
-	}
-	var median = ss.median(ar);
-	return median;
-}
-
-
 function getCodes(votes)
 {
 	var ans = [];
 	l = votes.length;
 	max_p = votes[0].vote;
-	//threshold = max_p*thold;
-	
-	var mad = getMad(votes);
-	var medianvotes = getMedian(votes);
-	
-	threshold = thold;  //from input parameters, the modified z-score
-		
-	
-	
-	for (var y = 0; y <  Math.min(votes.length,30); y++)
+	threshold = max_p*thold;
+
+	for (var y = 0; y < l; y++)
 	{	
-		vote = 0.6745 * (votes[y].vote - medianvotes)/mad;
-		console.log(votes[y].vote+" "+threshold+" "+vote);
-		if (typeof votes[y] != 'undefined' && vote > threshold)
+		console.log(votes[y].vote+" "+threshold+" "+thold);
+		if (typeof votes[y] != 'undefined' && votes[y].vote > threshold)
 		{
 			ans.push(votes[y].category);
 		}
-	}
-	if (ans.length == 0)
-	{
-		ans.push(votes[0].category);
 	}
 	return ans;
 
@@ -142,6 +107,7 @@ function findCodeLength(theseClassifiers)
 
 function everybodyVotes(classVoters)
 {
+	
 	//init the vote counts and ranking
 	for (var v = 0; v < classVoters.length; v++)
 	{
@@ -158,7 +124,6 @@ function everybodyVotes(classVoters)
 		
 	}
 	
-	//coalesce all votes into final voter
 	for (var v = 1; v < classVoters.length; v++)
 	{
 		var l = classVoters[v].length;
@@ -180,7 +145,6 @@ function everybodyVotes(classVoters)
 		return b.vote-a.vote;
 	});
 	
-	//return that voter
 	return classVoters[classVoters.length-1];
 }
 
@@ -416,7 +380,8 @@ var sys = require("sys");
     		
     		//answer array
     		var ans =[];
-    				
+    		
+    		
     		//check to see if the classifier is ready (has read all the training input)
     		if (bReady)
     		{
@@ -565,6 +530,8 @@ var sys = require("sys");
 				//if we have all of our good classes to attempt classification with
 				if (bFinished)
 				{
+					
+		
 					var classVoters = [];
 					
 					for (var r = 0; r < theseClassifiers.length; r++)
@@ -583,7 +550,8 @@ var sys = require("sys");
 					var votes = everybodyVotes(classVoters);
 					
 					// get codes to report out , based upon the threshold value
-					ans = getCodes(votes);					
+					ans = getCodes(votes);
+						
 				}	
 			}
 			else
