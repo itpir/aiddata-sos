@@ -12,7 +12,9 @@ var tfidf = new TfIdf();
 
 var autocoderURL = process.argv[2]; //the url to the autocoding service, such as: http://localhost:3000/classify.json
 var csvfile = process.argv[3]; 		//get the filename from the command line
-var stoponerror = process.argv[4]; 	//get the stoponerror from the command line
+var purge = process.argv[4]; 		//get the purge from the command line
+var ttype = process.argv[5]; 		//get the threshold type from the command line
+var thold = process.argv[6]; 		//get the threshold value from the command line
 var totalScore = 0;
 var possTotal = 0;
 var doc = 0;
@@ -23,10 +25,10 @@ process.stdout.write("human_codes\trobo_codes\tdoc_length\tround_score\tpossible
     
 
 //we need at least the csvfile
-if (!csvfile || !autocoderURL)
+if (!csvfile || !autocoderURL || !purge || !thold || !ttype)
 {
-	console.log ("Missing CSV or autocoder URL, example:");
-    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt\"");
+	console.log ("Missing Paramaters, example:");
+    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt\" 0 0 3.5");
 	process.exit(1);
 }
 
@@ -50,7 +52,7 @@ csv()
 // on each record, populate the map and check the codes
 .on('record', function (data, index)
 {
-	//console.log("test");
+
 	title = data.title;
 	donor = data.donor;
 	recipient = data.recipient;
@@ -68,19 +70,25 @@ csv()
 	codes = codes.map(function (val) { return val; });
 	
 
-
-
-
 	var options =
 	{
-    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient,
+    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient+'&thold='+thold+'&ttype='+ttype+'&purge='+purge,
     	codes:  codes,
     	len: total_desc.length
 	};
+	
+	//only purge once per run
+	if (purge)
+	{
+		purge = 0;
+	}
 
 	function callback(error, response, body)
 	{
     	if (!error && response.statusCode == 200) {
+    		
+    
+    		
     		//console.log(info);
         	var info = JSON.parse(body);
         	reported_codes = info.length;
