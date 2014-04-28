@@ -5,11 +5,6 @@ var http = require('http');
 var request = require("request");
 var S = require('string');
 
-var natural = require('natural');
-var TfIdf = natural.TfIdf;
-var tfidf = new TfIdf();
-
-
 var autocoderURL = process.argv[2]; //the url to the autocoding service, such as: http://localhost:3000/classify.json
 var csvfile = process.argv[3]; 		//get the filename from the command line
 var purge = process.argv[4]; 		//get the purge from the command line
@@ -52,7 +47,7 @@ csv()
 // on each record, populate the map and check the codes
 .on('record', function (data, index)
 {
-
+	id = data.aiddata_id;
 	title = data.title;
 	donor = data.donor;
 	recipient = data.recipient;
@@ -60,11 +55,6 @@ csv()
 	long_description = data.long_description;
 
 	total_desc = title+' '+short_description+' '+long_description;
-	total_desc = S(total_desc).stripTags().s;
-	total_desc = S(total_desc).stripPunctuation().s;
- 	total_desc = total_desc.toLowerCase(total_desc);
- 	
- 	
 
 	var codes = data.aiddata_activity_code.split("|");
 	codes = codes.map(function (val) { return val; });
@@ -72,7 +62,7 @@ csv()
 
 	var options =
 	{
-    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient+'&thold='+thold+'&ttype='+ttype+'&purge='+purge,
+    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient+'&thold='+thold+'&ttype='+ttype+'&purge='+purge+'&id='+id,
     	codes:  codes,
     	len: total_desc.length
 	};
