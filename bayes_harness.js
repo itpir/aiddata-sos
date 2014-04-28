@@ -62,7 +62,6 @@ Array.prototype.sumvotes = function() {
             if(a[i].category === a[j].category)
             {
             	s = a[i].vote+a[j].vote;
-            	//console.log("Reinforcing: "+a[i].category+", "+a[i].vote+" ==> "+s);
             	a[i].nVotes += a[j].nVotes;
             	a[i].vote += a[j].vote;
                 a.splice(j, 1); 
@@ -201,14 +200,13 @@ function getCodesbyPercentile(votes)
 
 	for (var y = 0; y < l; y++)
 	{	
-		if (typeof votes[y] != 'undefined' && votes[y].vote > threshold)
+		if (typeof votes[y] != 'undefined' && votes[y].vote >= threshold)
 		{	
-			console.log("\t\t"+votes[y].category+" "+votes[y].vote+" "+max_p);
+			console.log("\t\t"+votes[y].category+" "+votes[y].vote+" "+threshold);
 			ans.push(votes[y].category);
 		}
 	}
 	return ans;
-
 }
 
 function getCodesbyMAD(votes)
@@ -291,7 +289,6 @@ function everybodyVotes(classVoters,input_string)
 	classSums.sort(function(a, b){
 		return b.vote-a.vote;
 	});
-	
 	return classSums;
 }
 
