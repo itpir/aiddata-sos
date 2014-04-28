@@ -80,7 +80,7 @@ function findcoderule(array,textmd5)
 	{
 		thisKey = array[i].textmd5;
 		bFound = false;
-		if (thisKey == textmd5)
+		if (thisKey == textmd5 && array[i].trainset)
 		{
 			for (var y = 0; y < results.length; y++)
 			{
@@ -495,7 +495,7 @@ csv()
 				if( i <= tokcount)
 				{
 					//repeat the term by the tfidf weight
-					for (var rep = 0; rep <  (item.tfidf / 10)+1; rep ++)
+					for (var rep = 0; rep <  ((item.tfidf / 10)+1); rep ++)
 					{
 						text += item.term+' ';
 					}
@@ -616,14 +616,11 @@ var sys = require("sys");
     			}
     		}
     		
-    		// check to see if this can be coded by rule
-    		coderule = [];
-    		coderule = findcoderule(training_data, md5(input_string));
-    		bFinished = (coderule.length > 0);
-    		
 			//check to see if the classifier is ready (has read all the training input)
 			if (bReady)
 			{
+				console.log("\tProject: " +id);
+				
 				var test = null;
 				var szClass = 'Donor + Recipient';
 				var classKey =  donor + recipient;
@@ -631,8 +628,12 @@ var sys = require("sys");
 				var training_size = 0;
 				var nProjs = 0;
 				var theseClassifiers = [];
-				var bFinished = false;
-			
+				
+				// check to see if this can be coded by rule
+    			coderule = [];
+    			coderule = findcoderule(training_data, md5(input_string));
+    			bFinished = (coderule.length > 0);
+
 				while (!bFinished)
 				{
 					//the key is hashing the class (donor,etc)
@@ -734,12 +735,10 @@ var sys = require("sys");
 					}
 				
 					//use the dumb as dirt default classifier, too
-				
 					test = classifier.categorize_list(input_string);
 					test.votemult = getVotesMultByClass('default');
 					classVoters.push(test);
 					
-					console.log("\tProject: " +id);
 					// get codes to report out , based upon the code rules, or threshold value and threshold type
 					if (coderule.length > 0)
 					{
@@ -748,7 +747,7 @@ var sys = require("sys");
 					}
 					else
 					{
-						console.log("\tUnable to Code By Rule, We have "+classVoters.length+" classifiers voting.");
+						console.log("\tWe have "+classVoters.length+" classifiers voting.");
 						var votes = everybodyVotes(classVoters, input_string);
 						if (ttype == 0)
 						{
