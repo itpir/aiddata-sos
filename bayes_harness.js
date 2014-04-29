@@ -71,15 +71,17 @@ Array.prototype.sumvotes = function() {
     return a;
 };
 
-function findcoderule(array,textmd5)
+function findcoderule(array,textmd5, donormd5, recipientmd5)
 {
 	var results = [];
   
 	for (var i = 0, len = array.length; i < len; i++) 
 	{
 		thisKey = array[i].textmd5;
+		donorKey = array[i].donormd5;
+		recipientKey = array[i].recipientmd5;
 		bFound = false;
-		if (thisKey == textmd5 && array[i].trainset)
+		if (thisKey === textmd5 && array[i].trainset && donorKey === donormd5 && recipientKey == recipientmd5)
 		{
 			for (var y = 0; y < results.length; y++)
 			{
@@ -315,14 +317,18 @@ function insert(element, array)
 
 function locationOf(element, array, start, end) 
 {
-  if (array.length == 0)
+  if (array.length == 0) {
   	return 0;
+  	}
   start = start || 0;
   end = end || array.length;
   var pivot = parseInt(start + (end - start) / 2, 10);
-  if (array[pivot].project_id === element.project_id) return pivot;
-  if (end - start <= 1)
+  if (array[pivot].project_id === element.project_id){
+   return pivot;
+   }
+  if (end - start <= 1) {
     return array[pivot].project_id > element.project_id ? pivot - 1 : pivot;
+  }
   if (array[pivot].project_id < element.project_id) {
     return locationOf(element, array, pivot, end);
   } else {
@@ -335,25 +341,23 @@ function findProject(training_data, rec)
 	var retval = false;
 	
 	var i = locationOf(rec,training_data);
-	if (i >= 0)
+	if (i > 0)
 	{
-		//console.log(training_data[i].project_id+" Found "+rec.project_id+" at: "+i);
 		retval = true;
 		while ( i > 0 && training_data[i].project_id === rec.project_id)
 		{
 			i--;
 		}
-		i++;
+		//move to first record to update
+		if (training_data[i].project_id != rec.project_id)
+		{
+			i++;
+		}
 		while ( i < training_data.length && training_data[i].project_id === rec.project_id)
 		{
-		//	console.log("Setting at: "+i);
 			training_data[i].trainset = true;
 			i++;
 		}
-	}
-	else
-	{
-		console.log("Not Found: "+rec.project_id);
 	}
 	return retval;
 }
@@ -515,14 +519,18 @@ csv()
 		if( (index % 1000) == 0)
 			console.log("Seen "+ index+" coded projects.");
 	
-		//save record in the sorted list
-		insert(rec,training_data);
-		
 		if (Math.random() > (1-npcttrain) )
 		{
 			rec.trainset = true;
 			findProject(training_data,rec);
 		}
+		else
+		{
+			rec.trainset = false;
+		}
+		
+		//save record in the sorted list
+		insert(rec,training_data);
 	}
  })
  
@@ -536,34 +544,42 @@ csv()
     total_count += 1;
 
 	var count = 0;
+	
+	//remove all unused elements
+	console.log("Removing Unused Elements..");
 	for ( var v = 0; v < training_data.length; v++)
 	{
-		if (training_data[v].trainset)
+		if (training_data[v].trainset == false)
 		{
-			count++;
-			if ((count % 1000) == 0)
-			{
-				console.log("\tLearned "+ count+" coded projects.");
-			}
-	
-			//the default classifier, make it learn
-			
-			text = uncompress(training_data[v].text);
-			text = text.toString('utf8');
-			classifier.learn(text, training_data[v].act_code);
+			training_data.splice(v,1);
+		}
+	}
+	console.log("Training Length is:"+ training_data.length);
+	for ( var v = 0; v < training_data.length; v++)
+	{
+		count++;
+		if ((count % 1000) == 0)
+		{
+			console.log("\tLearned "+ count+" coded projects.");
+		}
 
-			//the individual activity code classifiers, make them learn
-			if (!act_classifiers[training_data[v].act_code])
-			{
-				act_classifiers[training_data[v].act_code] = bayes();
-				act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
-				act_classifiers[training_data[v].act_code].nExamples =  1;
-			}
-			else
-			{
-				act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
-				act_classifiers[training_data[v].act_code].nExamples++;
-			}
+		//the default classifier, make it learn
+		
+		text = uncompress(training_data[v].text);
+		text = text.toString('utf8');
+		classifier.learn(text, training_data[v].act_code);
+
+		//the individual activity code classifiers, make them learn
+		if (!act_classifiers[training_data[v].act_code])
+		{
+			act_classifiers[training_data[v].act_code] = bayes();
+			act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
+			act_classifiers[training_data[v].act_code].nExamples =  1;
+		}
+		else
+		{
+			act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
+			act_classifiers[training_data[v].act_code].nExamples++;
 		}
 	}
 	console.log("Done Training: Total Records: "+count);
@@ -628,7 +644,7 @@ var sys = require("sys");
 				
 				// check to see if this can be coded by rule
     			coderule = [];
-    			coderule = findcoderule(training_data, md5(input_string));
+    			coderule = findcoderule(training_data, md5(input_string), md5(donor), md5(recipient));
     			bFinished = (coderule.length > 0);
 
 				while (!bFinished)
