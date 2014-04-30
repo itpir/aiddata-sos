@@ -71,6 +71,16 @@ Array.prototype.sumvotes = function() {
     return a;
 };
 
+
+function spliceOne(arr, index) 
+{
+	 var len=arr.length;
+	 if (!len) { return }
+	 while (index<len) { 
+		   arr[index] = arr[index+1]; index++ }
+	 arr.length--;
+}
+
 function findcoderule(array,textmd5, donormd5, recipientmd5)
 {
 	var results = [];
@@ -81,7 +91,7 @@ function findcoderule(array,textmd5, donormd5, recipientmd5)
 		donorKey = array[i].donormd5;
 		recipientKey = array[i].recipientmd5;
 		bFound = false;
-		if (thisKey === textmd5 && array[i].trainset && donorKey === donormd5 && recipientKey == recipientmd5)
+		if (thisKey === textmd5 && donorKey === donormd5 && recipientKey == recipientmd5)
 		{
 			for (var y = 0; y < results.length; y++)
 			{
@@ -177,15 +187,15 @@ function getVotesMultByClass (szClass)
 {
 	if (szClass == 'Donor + Recipient')
 	{
-		return 2.00;
+		return 4.00;
 	}
 	else if (szClass == 'Donor')
 	{
-		return 1.00;
+		return 2.00;
 	}
 	else if (szClass == 'Recipient')
 	{
-		return 1.00;
+		return 2.00;
 	}
 	else
 	{	
@@ -202,9 +212,10 @@ function getCodesbyPercentile(votes)
 
 	for (var y = 0; y < l; y++)
 	{	
+		console.log("\t\tActivity Code\t\tVote\t\tPercentile");
 		if (typeof votes[y] != 'undefined' && votes[y].vote >= threshold)
 		{	
-			console.log("\t\t"+votes[y].category+" "+votes[y].vote+" "+threshold);
+			console.log("\t\t"+votes[y].category+"\t\t"+votes[y].vote+"\t\t"+threshold);
 			ans.push(votes[y].category);
 		}
 	}
@@ -219,12 +230,12 @@ function getCodesbyMAD(votes)
 	var mad = getMad(votes);
 	var medianvotes = getMedian(votes);
 
-	threshold = thold;  //from input parameters, the modified z-score
-
+	console.log("\t\tActivity Code\t\tVote\t\tMAD");
 	for (var y = 0; y <  votes.length; y++)
 	{	
 		vote = 0.6745 * (votes[y].vote - medianvotes)/mad;
-		if (typeof votes[y] != 'undefined' && vote > threshold)
+		console.log("\t\t"+votes[y].category+"\t\t"+vote+"\t\t"+thold);
+		if (typeof votes[y] != 'undefined' && vote > thold)
 		{
 			ans.push(votes[y].category);
 		}
@@ -234,7 +245,6 @@ function getCodesbyMAD(votes)
 		ans.push(votes[0].category);
 	}
 	return ans;
-
 }
 
 function everybodyVotes(classVoters,input_string)
@@ -256,7 +266,7 @@ function everybodyVotes(classVoters,input_string)
 	ar_act.votemult = getVotesMultByClass("Activity Codes");
 	if (ar_act.length > 0)
 	{
-		classVoters.push(ar_act);
+		//classVoters.push(ar_act);
 	}	
 	
 	//init the vote counts and ranking
@@ -279,14 +289,12 @@ function everybodyVotes(classVoters,input_string)
 		classSums = classSums.concat(classVoters[t]).sumvotes();
 	}
 	
-	
 	//..and average them
 	for (var t = 0; (t < classSums.length ); t++)
 	{
 		classSums[t].vote = classSums[t].vote/classVoters.length;
 	}
 
-	
 	//sort by voting; final values will be in last voter
 	classSums.sort(function(a, b){
 		return b.vote-a.vote;
@@ -300,13 +308,12 @@ function findClasstoPrune(newClass)
 	var l = aClassifiers.length;
 	if ( l > nLRU && l > 0)
 	{
-		console.log("Pruning: "+aClassifiers[0].className+" ("+aClassifiers[0].hash+")");
+		console.log("\tPruning: "+aClassifiers[0].className+" ("+aClassifiers[0].hash+")");
 		var c = aClassifiers.splice (0,1);
 		c = null;
 	}
 	//...and push on the new one
 	aClassifiers.push(newClass);
-	
 }
 
 function insert(element, array) 
@@ -317,46 +324,40 @@ function insert(element, array)
 
 function locationOf(element, array, start, end) 
 {
-  if (array.length == 0) {
-  	return 0;
-  	}
-  start = start || 0;
-  end = end || array.length;
-  var pivot = parseInt(start + (end - start) / 2, 10);
-  if (array[pivot].project_id === element.project_id){
-   return pivot;
-   }
-  if (end - start <= 1) {
-    return array[pivot].project_id > element.project_id ? pivot - 1 : pivot;
-  }
-  if (array[pivot].project_id < element.project_id) {
-    return locationOf(element, array, pivot, end);
-  } else {
-    return locationOf(element, array, start, pivot);
-  }
+	if (array.length == 0) {
+		return 0;
+	}
+	start = start || 0;
+	end = end || array.length;
+	var pivot = parseInt(start + (end - start) / 2, 10);
+	if (array[pivot].project_id === element.project_id)
+	{
+		return pivot;
+	}
+	if (end - start <= 1) 
+	{
+		return array[pivot].project_id > element.project_id ? pivot - 1 : pivot;
+	}
+	if (array[pivot].project_id < element.project_id) 
+	{
+		return locationOf(element, array, pivot, end);
+	} 
+	else 
+	{
+		return locationOf(element, array, start, pivot);
+	}
 }
 
 function findProject(training_data, rec)
 {
-	var retval = false;
+	var retval = -1;
 	
 	var i = locationOf(rec,training_data);
-	if (i > 0)
+	if (i > 0 && training_data.length > 0 && (i < training_data.length-1))
 	{
-		retval = true;
-		while ( i > 0 && training_data[i].project_id === rec.project_id)
+		if (training_data[i+1].project_id === rec.project_id || training_data[i-1].project_id === rec.project_id || training_data[i].project_id === rec.project_id)
 		{
-			i--;
-		}
-		//move to first record to update
-		if (training_data[i].project_id != rec.project_id)
-		{
-			i++;
-		}
-		while ( i < training_data.length && training_data[i].project_id === rec.project_id)
-		{
-			training_data[i].trainset = true;
-			i++;
+			retval = i;
 		}
 	}
 	return retval;
@@ -419,8 +420,7 @@ csv()
     	{	
  			strHeader += key+'|';	
  		}
- 		header = false;
- 		
+ 		header = false;	
  	}
  	else
  	{
@@ -479,8 +479,8 @@ csv()
 			recipientmd5: md5(recipient),
 			donorrcptmd5: md5 (donor+recipient),
 			project_id : project_id,
-			text : text,
 			trainset : false,
+			text : text,
 			textmd5: md5(text)
 		}
 		
@@ -490,13 +490,15 @@ csv()
 			tfidf.addDocument(text);
 			var i =0;
 			text = '';
+			//console.log(tfidf.listTerms(doc));
+			//console.log("-----");
 			tfidf.listTerms(doc).forEach(function(item) 
 			{
 				i++;
 				if( i <= tokcount)
 				{
 					//repeat the term by the tfidf weight
-					for (var rep = 0; rep <  ((item.tfidf / 10)+1); rep ++)
+					for (var rep = 0; rep <  (item.tfidf+1); rep ++)
 					{
 						text += item.term+' ';
 					}
@@ -518,16 +520,6 @@ csv()
 		
 		if( (index % 1000) == 0)
 			console.log("Seen "+ index+" coded projects.");
-	
-		if (Math.random() > (1-npcttrain) )
-		{
-			rec.trainset = true;
-			findProject(training_data,rec);
-		}
-		else
-		{
-			rec.trainset = false;
-		}
 		
 		//save record in the sorted list
 		insert(rec,training_data);
@@ -540,20 +532,39 @@ csv()
     var nProjectsCodes = [];
     var nProjs = countProjects(training_data);
     
-    //train
-    total_count += 1;
-
 	var count = 0;
 	
 	//remove all unused elements
 	console.log("Removing Unused Elements..");
-	for ( var v = 0; v < training_data.length; v++)
+	
+	var len = training_data.length;
+	while (len--) 
 	{
-		if (training_data[v].trainset == false)
+		if (Math.random() > (1-npcttrain) && len)
 		{
-			training_data.splice(v,1);
+		
+			//train up on this (keep)
+			training_data[len].trainset = true;
+			pi = training_data[len].project_id;
+			while (len > 1 && (pi === training_data[len-1].project_id))
+			{
+				training_data[len-1].trainset = true;
+				len--;
+			}
 		}
 	}
+	
+	var len = training_data.length;
+	while (len--) 
+	{
+		if (training_data[len].trainset == false)
+		{
+			//console.log("splicing: "+len);
+			spliceOne(training_data,len);
+		}
+			
+	}
+	
 	console.log("Training Length is:"+ training_data.length);
 	for ( var v = 0; v < training_data.length; v++)
 	{
@@ -632,7 +643,7 @@ var sys = require("sys");
 			//check to see if the classifier is ready (has read all the training input)
 			if (bReady)
 			{
-				console.log("\tProject: " +id);
+				console.log("Project: " +id);
 				
 				var test = null;
 				var szClass = 'Donor + Recipient';
