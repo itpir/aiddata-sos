@@ -7,35 +7,45 @@ var S = require('string');
 
 var autocoderURL = process.argv[2]; //the url to the autocoding service, such as: http://localhost:3000/classify.json
 var csvfile = process.argv[3]; 		//get the filename from the command line
-var purge = process.argv[4]; 		//get the purge from the command line
-var ttype = process.argv[5]; 		//get the threshold type from the command line
-var thold = process.argv[6]; 		//get the threshold value from the command line
+var thold = process.argv[4]; 		//get the MAD threshold value from the command line
 var totalScore = 0;
 var possTotal = 0;
 var doc = 0;
 var start = +new Date();  // log start timestamp
 
+var totalThreshold = 0;
 
-process.stdout.write("human_codes\trobo_codes\tdoc_length\tround_score\tpossible_score\trunning_total_possible\trunning_total_score\tpercent_of_possible\r\n");
+process.stdout.write("id\ttext\thuman_codes\trobo_codes\tlog diff\tdoc_length\tround_score\tpossible_score\trunning_total_possible\trunning_total_score\tpercent_of_possible\r\n");
     
 
 //we need at least the csvfile
-if (!csvfile || !autocoderURL || !purge || !thold || !ttype)
+if (!csvfile || !autocoderURL || !thold )
 {
-	console.log ("Missing Paramaters, example:");
-    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt\" 0 0 3.5");
+	console.log ("Missing Parameters, example:");
+    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt\" 3.5");
 	process.exit(1);
 }
 
-function intersect(a, b) {
+function intersect(a, b,info) 
+{
     var results = [];
 
+	var max = -1;
 	for (var i = 0; i < a.length; i++) {
         for (var j = 0; j < b.length; j++) {
         	if (b[j].trim()==(a[i].trim())) {
+        		max = j;
             	results.push(a[i]);
         	}
         }
+    }
+    if (max >=0)
+    {
+    	totalThreshold += info[max].vote;
+    }
+    else
+    {
+    	totalThreshold += info[info.length-1].vote;	
     }
     return results;
 }
@@ -49,8 +59,6 @@ csv()
 {
 	id = data.aiddata_id;
 	title = data.title;
-	donor = data.donor;
-	recipient = data.recipient;
 	short_description = data.short_description;
 	long_description = data.long_description;
 
@@ -62,34 +70,38 @@ csv()
 
 	var options =
 	{
-    	url: autocoderURL + '?description='+total_desc+'&donor='+donor+'&recipient='+recipient+'&thold='+thold+'&ttype='+ttype+'&purge='+purge+'&id='+id,
+    	url: autocoderURL + '?description='+total_desc+'&thold='+thold+"&id="+id,
     	codes:  codes,
-    	len: total_desc.length
+    	len: total_desc.length,
+    	total_desc: total_desc,
+    	id: id
 	};
 	
-	//only purge once per run
-	if (purge)
-	{
-		purge = 0;
-	}
 
 	function callback(error, response, body)
 	{
     	if (!error && response.statusCode == 200) {
     		
     
-    		
     		//console.log(info);
         	var info = JSON.parse(body);
         	reported_codes = info.length;
+        	id = this.req.res.request.id;
+        	total_desc = this.req.res.request.total_desc;
         	human_codes = this.req.res.request.codes;
         	var robo_codes = [];
+        	var mad = [];
         	for (y = 0; y < reported_codes; y++)
         	{
-        		robo_codes.push(info[y]);
+        		robo_codes.push(info[y].act_code);
+        	}
+        	
+        	for (y = 0; y < reported_codes; y++)
+        	{
+        		mad.push(info[y].vote);
         	}
 
-        	matched_arr = intersect(human_codes,robo_codes);
+        	matched_arr = intersect(human_codes,robo_codes, info);
         	thisScore = 0;
 
     		possTotal += human_codes.length;
@@ -100,10 +112,15 @@ csv()
                 thisScore =(matched_arr.length / (Math.abs (human_codes.length - reported_codes) +1));
         		totalScore += thisScore;
         	}
-			
+			process.stdout.write(JSON.stringify(id));
+			process.stdout.write('\t');
+			process.stdout.write(JSON.stringify(total_desc));
+			process.stdout.write('\t');
 			process.stdout.write(JSON.stringify(human_codes));
 			process.stdout.write('\t');
 			process.stdout.write(JSON.stringify(robo_codes));
+			process.stdout.write('\t');
+			process.stdout.write(JSON.stringify(mad));
 			process.stdout.write('\t');
 			process.stdout.write(this.req.res.request.len.toString());
 			process.stdout.write('\t');
@@ -117,8 +134,6 @@ csv()
 			process.stdout.write('\t');
 			process.stdout.write(((totalScore/possTotal)*100).toString());
 			process.stdout.write('\r\n');
-		
-
     	}
 	}
 	

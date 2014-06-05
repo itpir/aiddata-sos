@@ -1,15 +1,15 @@
 var csv = require('csv');
 var url = require('url');
 var S = require('string');
-var md5 = require('MD5');
 var ss = require('simple-statistics');
-var compress = require('compress-buffer').compress;
-var uncompress = require('compress-buffer').uncompress;
+var md5 = require('MD5');
 
-var MAD = 3.5;
+compress = require('compress-buffer').compress;
+uncompress = require('compress-buffer').uncompress;
+
 
 var header = true;
-var previous_proj = '';
+
 
 /***************************
 GET THE COMMAND LINE VARS
@@ -17,40 +17,30 @@ GET THE COMMAND LINE VARS
 /* get the training file name from command line */
 var csvfile = process.argv[2];
 
-/*get the number of classifiers to cache */			
-var nLRU = process.argv[3]; 
-
 /*get the token count for TF*IDF. This is the value to limit of TF*IDF tokens to use as classifier trainers*/
-var tokcount = process.argv[4];
+var tokcount = process.argv[3];
 
 /* get the document length used to determine when we tokenize (shorten) using TF*IDF*/		
-var tlen = process.argv[5];	
+var tlen = process.argv[4];	
 
 /* get the number of documents tokenized to reset the TF*IDF state*/		
-var nDocsReset = process.argv[6];
+var nDocsReset = process.argv[5];
 
-/* get the number of codes at minimum that must be present to use a domain classifier*/		
-var nCodesThreshold = process.argv[7];	
-
-/* get the number of codes at minimum that must be present to use a domain classifier*/		
-var npcttrain = process.argv[8];					
-				
-
-
+/* get the ration of bad to good examples*/		
+var nRatio = process.argv[6];
+							
 // init classifiers and TF*IDF
 var natural = require('natural');
 var TfIdf = natural.TfIdf;
-var tfidf = new TfIdf();
+
+var weakClassifiers = [];
+
+var weakTfidf = [];
+var training_data = [];
 
 var bayes = require('bayes');
-var classifier = bayes();      //the general purpose classifier
-var act_classifiers = [];
-var aClassifiers = [];
 
-var doc = 0;
 var total_count = 0;
-
-var training_data = [];
 var bReady = false;
 
 Array.prototype.sumvotes = function() {
@@ -71,255 +61,30 @@ Array.prototype.sumvotes = function() {
     return a;
 };
 
-
-function spliceOne(arr, index) 
+function insertIntoTraining(rec,training_data)
 {
-	 var len=arr.length;
-	 if (!len) { return }
-	 while (index<len) { 
-		   arr[index] = arr[index+1]; index++ }
-	 arr.length--;
-}
-
-function findcoderule(array,textmd5, donormd5, recipientmd5)
-{
-	var results = [];
-  
-	for (var i = 0, len = array.length; i < len; i++) 
+	i = locationOf(rec,training_data);
+	if (i > 0)
 	{
-		thisKey = array[i].textmd5;
-		donorKey = array[i].donormd5;
-		recipientKey = array[i].recipientmd5;
-		bFound = false;
-		if (thisKey === textmd5 && donorKey === donormd5 && recipientKey == recipientmd5)
+		if (training_data[i].coderulemd5 != rec.coderulemd5)
 		{
-			for (var y = 0; y < results.length; y++)
-			{
-				if (results[y] == array[i].act_code)
-				{
-					bFound = true;
-				}
-			}
-			if (!bFound)
-			{
-				results.push(array[i].act_code);
-			}
-		}
-	}
-	
-	return results;
-}
-
-function fastfilter(array, classKey, szClass)
- {
-  	var results = [];
-  	
-	for (var i = 0, len = array.length; i < len; i++) 
-	{
-		if (szClass == 'Donor + Recipient')
-		{
-			thisKey = array[i].donorrcptmd5; 
-		} 
-		else  if (szClass == 'Donor') 
-		{
-			thisKey =  array[i].donormd5;
-		}
-		else  if (szClass == 'Recipient') 
-		{
-			thisKey =  array[i].recipientmd5;
-		}
-		if (thisKey == classKey)
-		{
-			results.push(array[i]);
-		}
-	}
-	return results;
-}
-
-function countProjects (thisData)
-{
-	nProjs = 0;
-	var nProjectsCodes = [];
-	for (var y = 0; y < thisData.length; y++)
-	{
-		
-		// keep track of codes per project
-		if (!nProjectsCodes[thisData[y].project_id])
-		{
-			nProjectsCodes[thisData[y].project_id] = 1;
-			nProjs  = nProjs + 1;
+			insert (rec, training_data);
 		}
 		else
 		{
-			nProjectsCodes[thisData[y].project_id]++;
+			training_data[i].count = training_data[i].count+1;
 		}
-	
-	}
-	return nProjs;
-}
-
-function getMad(votes)
-{
-	var ar = [];
-	for (var y = 0;  y < Math.min(votes.length,30); y++)
-	{
-		ar.push(votes[y].vote);
-	}
-	var mad = ss.mad(ar);
-	return mad;
-}
-
-function getMedian(votes)
-{
-	var ar = [];
-	for (var y = 0; y < Math.min(votes.length,30); y++)
-	{
-		ar.push(votes[y].vote);
-	}
-	var median = ss.median(ar);
-	return median;
-}
-
-
-//we give more votes to more specific classifiers; default is 1
-
-function getVotesMultByClass (szClass)
-{
-	if (szClass == 'Donor + Recipient')
-	{
-		return 4.00;
-	}
-	else if (szClass == 'Donor')
-	{
-		return 2.00;
-	}
-	else if (szClass == 'Recipient')
-	{
-		return 2.00;
 	}
 	else
-	{	
-		return 1.00;			
-	}
-}
-
-function getCodesbyPercentile(votes)
-{
-	var ans = [];
-	l = votes.length;
-	max_p = votes[0].vote;
-	threshold = max_p*thold;
-
-	for (var y = 0; y < l; y++)
-	{	
-		console.log("\t\tActivity Code\t\tVote\t\tPercentile");
-		if (typeof votes[y] != 'undefined' && votes[y].vote >= threshold)
-		{	
-			console.log("\t\t"+votes[y].category+"\t\t"+votes[y].vote+"\t\t"+threshold);
-			ans.push(votes[y].category);
-		}
-	}
-	return ans;
-}
-
-function getCodesbyMAD(votes)
-{
-	var ans = [];
-	l = votes.length;
-
-	var mad = getMad(votes);
-	var medianvotes = getMedian(votes);
-
-	console.log("\t\tActivity Code\t\tVote\t\tMAD");
-	for (var y = 0; y <  votes.length; y++)
-	{	
-		vote = 0.6745 * (votes[y].vote - medianvotes)/mad;
-		console.log("\t\t"+votes[y].category+"\t\t"+vote+"\t\t"+thold);
-		if (typeof votes[y] != 'undefined' && vote > thold)
-		{
-			ans.push(votes[y].category);
-		}
-	}
-	if (ans.length == 0)
 	{
-		ans.push(votes[0].category);
+		insert (rec, training_data);
 	}
-	return ans;
-}
-
-function everybodyVotes(classVoters,input_string)
-{
-	var ar_act = [];
-	for (key in act_classifiers)
-	{
-		if (act_classifiers[key].categorize_list && act_classifiers[key].nExamples > nCodesThreshold)
-		{
-			test = act_classifiers[key].categorize_list(input_string);
-			test.votemult = 1.0;
-			if (test[0].probability != 0)
-			{
-				ar_act.push(test[0]);
-			}
-		}
-	}	
-	
-	ar_act.votemult = getVotesMultByClass("Activity Codes");
-	if (ar_act.length > 0)
-	{
-		//classVoters.push(ar_act);
-	}	
-	
-	//init the vote counts and ranking
-	for (var v = 0; v < classVoters.length; v++)
-	{	
-
-		var l = classVoters[v].length;
-		for (var t = 0; (t < l) ; t++)
-		{	
-			classVoters[v][t].vote =  ((100)/Math.abs(classVoters[v][t].probability))*classVoters[v].votemult;
-			classVoters[v][t].nVotes = 1;
-
-		}
-	}
-
-	//sum votes...
-	var classSums = classVoters[0];
-	for (var t = 1; (t < classVoters.length ); t++)
-	{
-		classSums = classSums.concat(classVoters[t]).sumvotes();
-	}
-	
-	//..and average them
-	for (var t = 0; (t < classSums.length ); t++)
-	{
-		classSums[t].vote = classSums[t].vote/classVoters.length;
-	}
-
-	//sort by voting; final values will be in last voter
-	classSums.sort(function(a, b){
-		return b.vote-a.vote;
-	});
-	return classSums;
-}
-
-function findClasstoPrune(newClass)
-{
-	//if we have more than nLRU classifiers in memory, pop off the oldest
-	var l = aClassifiers.length;
-	if ( l > nLRU && l > 0)
-	{
-		console.log("\tPruning: "+aClassifiers[0].className+" ("+aClassifiers[0].hash+")");
-		var c = aClassifiers.splice (0,1);
-		c = null;
-	}
-	//...and push on the new one
-	aClassifiers.push(newClass);
 }
 
 function insert(element, array) 
 {
-  array.splice(locationOf(element, array) + 1, 0, element);
-  return array;
+	array.splice(locationOf(element, array) + 1, 0, element);
+  	return array;
 }
 
 function locationOf(element, array, start, end) 
@@ -330,15 +95,15 @@ function locationOf(element, array, start, end)
 	start = start || 0;
 	end = end || array.length;
 	var pivot = parseInt(start + (end - start) / 2, 10);
-	if (array[pivot].project_id === element.project_id)
+	if (array[pivot].coderulemd5 === element.coderulemd5)
 	{
 		return pivot;
 	}
 	if (end - start <= 1) 
 	{
-		return array[pivot].project_id > element.project_id ? pivot - 1 : pivot;
+		return array[pivot].coderulemd5 > element.coderulemd5 ? pivot - 1 : pivot;
 	}
-	if (array[pivot].project_id < element.project_id) 
+	if (array[pivot].coderulemd5 < element.coderulemd5) 
 	{
 		return locationOf(element, array, pivot, end);
 	} 
@@ -348,67 +113,215 @@ function locationOf(element, array, start, end)
 	}
 }
 
-function findProject(training_data, rec)
+function locationOfActCode(act_code, array, start, end) 
 {
-	var retval = -1;
-	
-	var i = locationOf(rec,training_data);
-	if (i > 0 && training_data.length > 0 && (i < training_data.length-1))
-	{
-		if (training_data[i+1].project_id === rec.project_id || training_data[i-1].project_id === rec.project_id || training_data[i].project_id === rec.project_id)
-		{
-			retval = i;
-		}
+	if (array.length == 0) {
+		return 0;
 	}
-	return retval;
+	start = start || 0;
+	end = end || array.length;
+	var pivot = parseInt(start + (end - start) / 2, 10);
+	if (array[pivot].act_code === act_code)
+	{
+		while (pivot >= 0 && array[pivot].act_code == act_code)
+		{
+			pivot--;
+		}
+		pivot++;
+		return pivot;
+	}
+	if (end - start <= 1) 
+	{
+		return 0;
+	}
+	if (array[pivot].act_code < act_code) 
+	{
+		return locationOfActCode(act_code, array, pivot, end);
+	} 
+	else 
+	{
+		return locationOfActCode(act_code, array, start, pivot);
+	}
 }
 
-function findClassifier(hk)
+function locationOfProjCode(projcodemd5, array, start, end) 
 {
-	var retval = -1;
-	for (var y = 0; y < aClassifiers.length; y++)
+	if (array.length == 0) {
+		return 0;
+	}
+	start = start || 0;
+	end = end || array.length;
+	var pivot = parseInt(start + (end - start) / 2, 10);
+	if (array[pivot].projcodemd5 === projcodemd5)
 	{
-		if (aClassifiers[y].hash.localeCompare(hk) == 0)
+		return 1;
+	}
+	if (end - start <= 1) 
+	{
+		return 0;
+	}
+	if (array[pivot].projcodemd5 < projcodemd5) 
+	{
+		return locationOfProjCode(projcodemd5, array, pivot, end);
+	} 
+	else 
+	{
+		return locationOfProjCode(projcodemd5, array, start, pivot);
+	}
+}
+
+function initTF(classifiers)
+{
+	num = classifiers.length;
+	for (var c = 0; c < num; c++)
+	{
+		g = new TfIdf();
+		g.act_code = classifiers[c].act_code;
+		
+		weakTfidf.push(new TfIdf());
+	}
+}
+
+function learnWeak(i,text,code)
+{	
+	text = featureSelect(weakTfidf[i],text,tokcount);
+	weakClassifiers[i].learn(text,code);
+}
+
+
+function featureSelect (tfidf,text,tokcount)
+{
+	var i = 0;
+
+	if (text.length > tlen)
+	{
+		tfidf.addDocument(text);
+		text = '';
+		doc = tfidf.documents.length -1;
+		tfidf.listTerms(doc).forEach(function(item) 
 		{
-			retval = y;
-			break;
+			i++;
+			if( i <= tokcount)
+			{
+				text += item.term+' ';
+			}
+		});
+	}
+	return text;	
+}
+
+
+function getMad(votes)
+{
+	var ar = [];
+	for (var y = 0;  y <  votes.length; y++)
+	{
+		ar.push(votes[y].prob);
+	}
+	var mad = ss.mad(ar);
+	return mad;
+}
+
+function getMedian(votes)
+{
+	var ar = [];
+	for (var y = 0; y < votes.length; y++)
+	{
+		ar.push(votes[y].prob);
+	}
+	var median = ss.median(ar);
+	return median;
+}
+
+function getCodesbyMAD(votes, thold)
+{
+	var ans = [];
+	l = votes.length;
+
+	var mad = getMad(votes);
+	var medianvotes = getMedian(votes);
+
+	console.log("\t\tActivity Code\t\t\tRAW Vote\t\t\t\tMAD Vote\t\t\tMAD Threshold");
+	var y = 0;
+	while (y < votes.length)
+	{	
+		votes[y].di = votes[y].prob - medianvotes;
+		
+		votes[y].vote = ((0.6745)*(votes[y].di))/mad;
+		
+		console.log("\t\t"+votes[y].act_code+"\t\t\t"+votes[y].prob+"\t\t\t"+votes[y].di+"\t\t\t\t"+votes[y].vote);
+		if (typeof votes[y] != 'undefined' && votes[y].vote > thold)
+		{
+			ans.push(votes[y]);
+		}
+		y++;
+	}
+	if (ans.length == 0 && votes.length > 0)
+	{
+		ans.push(votes[0]);
+	}
+	return ans;
+}
+
+function codeInProj(code,id, training_data)
+{
+	var index = locationOfActCode(code, training_data);
+	
+	bFound = false;
+	while ((index < training_data.length) && (training_data[index].act_code === code) && (bFound == false))
+	{
+		if ( training_data[index].id === id)
+		{
+			bFound = true;
+		}
+		index++;
+	}
+
+	return bFound;
+}
+function everybodyVotes(classVoters,input_string)
+{
+	var ans = [];
+	for (var v = 0; v < classVoters.length; v++)
+	{	
+		if (classVoters[v] != 'undefined')
+		{	
+			classVoters[v].sort(function(a, b){
+				return b.probability-a.probability;
+			});
+			
+			// if the vote is positive for this code, take the delta between positive and negative as the vote
+			if (classVoters[v][0].category == "1")
+			{
+				var a1 = Object();
+				a1.category = classVoters[v][0].category;
+				a1.prob = classVoters[v][0].probability-classVoters[v][1].probability;
+				a1.act_code = classVoters[v].act_code;
+				ans.push(a1);
+			}
 		}
 	}
-	return retval;
+
+	ans.sort(function(a, b){
+		return b.prob-a.prob;
+	});	
+		
+	return ans;
+
 }
+
 
 function cleanText (text)
 {
 	text = S(text).stripTags().s;
-	text = text.replace(/[\.,-\/#!$%\^&\*;:{}=\-_`~()]/g," ");
  	text = S(text).stripPunctuation().s;
  	text = text.toLowerCase(text);
  	
  	return text;
 }
 
-function filterClass (szClass,classKey)
-{
-	return function(element) {
-		//set key
-		if (szClass == 'Donor + Recipient')
-		{
-			thisKey = element.donorrcptmd5; 
-		} 
-		else  if (szClass == 'Donor') 
-		{
-			thisKey =  element.donormd5;
-		}
-		else  if (szClass == 'Recipient') 
-		{
-			thisKey =  element.recipientmd5;
-		}
-		return (thisKey == classKey);
-    }
-}
 
-csv()
-.from.path(csvfile, { columns: true, delimiter: "\t" } )
+csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 
 // on each record, populate the map and check the codes
 .on('record', function (data, index) 
@@ -472,138 +385,140 @@ csv()
 		
 		//clean up the fields
 		text = cleanText(strRow);
-			
+		
 		var rec = {
 			act_code: act_code,
-			donormd5 : md5(donor),
-			recipientmd5: md5(recipient),
-			donorrcptmd5: md5 (donor+recipient),
-			project_id : project_id,
-			trainset : false,
+			id : project_id,
+			count: 0,
 			text : text,
-			textmd5: md5(text)
+			coderulemd5: md5(text+act_code),
+			projcodemd5: md5(project_id+act_code)
 		}
-		
-		//if doc length greater than length, tokenize using TF*IDF
-		if (text.length > tlen) 
-		{
-			tfidf.addDocument(text);
-			var i =0;
-			text = '';
-			//console.log(tfidf.listTerms(doc));
-			//console.log("-----");
-			tfidf.listTerms(doc).forEach(function(item) 
-			{
-				i++;
-				if( i <= tokcount)
-				{
-					//repeat the term by the tfidf weight
-					for (var rep = 0; rep <  (item.tfidf+1); rep ++)
-					{
-						text += item.term+' ';
-					}
-				}
-			});
-			doc++;
-			rec.text = text;
-	
-			//check if we should reset the TF*IDF//
-			if ((doc % nDocsReset) == 0)
-			{
-				tfidf = null;
-				tfidf = new TfIdf();
-				doc = 0;
-			}
-		}
-		var comp = new Buffer(rec.text, 'utf8');
-		rec.text = compress(comp);
-		
+				
 		if( (index % 1000) == 0)
-			console.log("Seen "+ index+" coded projects.");
+		{
+			console.log("Seen "+index+" coded projects.");
+		}
 		
-		//save record in the sorted list
-		insert(rec,training_data);
+		insertIntoTraining(rec,training_data);
+		
 	}
  })
  
  .on('end', function(count){
-  
-    bReady = true;
-    var nProjectsCodes = [];
-    var nProjs = countProjects(training_data);
-    
-	var count = 0;
-	
-	//remove all unused elements
-	console.log("Removing Unused Elements..");
-	
-	var len = training_data.length;
-	while (len--) 
-	{
-		if (Math.random() > (1-npcttrain) && len)
+    console.log("Done Reading.");
+    console.log("Finding Codes.");
+    sz = training_data.length;
+    for (var c = 0; c < sz; c++)
+    {
+    	bFound = false;
+    	
+		for (var y = 0; y < weakClassifiers.length; y++)
 		{
-		
-			//train up on this (keep)
-			training_data[len].trainset = true;
-			pi = training_data[len].project_id;
-			while (len > 1 && (pi === training_data[len-1].project_id))
+			if (weakClassifiers[y].act_code == training_data[c].act_code)
 			{
-				training_data[len-1].trainset = true;
-				len--;
+				weakClassifiers[y].count++;
+				bFound = true;
 			}
 		}
+		if (!bFound)
+		{
+			var cl = bayes();
+			cl.pos = 0;
+			cl.neg = 0;
+			cl.count = 1;
+			cl.act_code = training_data[c].act_code;
+			weakClassifiers.push(cl);
+		}
 	}
 	
-	var len = training_data.length;
-	while (len--) 
+	console.log("Codes Found: "+weakClassifiers.length);
+	initTF(weakClassifiers);
+	
+	console.log("Sorting Codes.");
+	
+	training_data.sort(function(a, b){	
+			return a.projcodemd5.localeCompare(b.projcodemd5);
+		});
+	
+	console.log("Training Codes.");	
+	var l = sz;
+	
+	//sort by activity code
+	training_data.sort(function(a, b){	
+		return a.act_code.localeCompare(b.act_code);
+	});
+	for (var y = 0; y < weakClassifiers.length; y++)
 	{
-		if (training_data[len].trainset == false)
+	
+		console.log("\tTraining classifier for: "+weakClassifiers[y].act_code);
+		
+		//find first of this code
+		var thisCode = locationOfActCode(weakClassifiers[y].act_code, training_data);
+		
+		//train all positive codes
+		console.log("\tTraining Positive Examples...");
+		while (thisCode < l && training_data[thisCode].act_code == weakClassifiers[y].act_code)
 		{
-			//console.log("splicing: "+len);
-			spliceOne(training_data,len);
+			weakClassifiers[y].pos++;
+			learnWeak(y, training_data[thisCode].text, 1);
+			thisCode++;
+		}
+		console.log("\tPositive Trained: "+ weakClassifiers[y].pos);
+		console.log("\tTraining Negative Examples...");
+		//train all negative codes; train at LEAST 1% of the total set as negative examples	
+		thisRatio = 0;
+		while (thisRatio < nRatio || weakClassifiers[y].neg < (l/100))
+		{
+			//find a negative example to train against
+			var t = Math.floor(Math.random()*l);
+			bF = codeInProj(weakClassifiers[y].act_code,training_data[t].id, training_data);
+			while ((training_data[t].act_code == weakClassifiers[y].act_code) && (bF == true))
+			{
+				t = Math.floor(Math.random()*l);
+				bF = codeInProj(weakClassifiers[y].act_code,training_data[t].id, training_data);
+			}
+				
+			weakClassifiers[y].neg++;
+			learnWeak(y, training_data[t].text, -1);
+			thisRatio = weakClassifiers[y].neg/weakClassifiers[y].pos;
+		}
+		console.log("\tNegative Trained: "+ weakClassifiers[y].neg);
+		
+		if (weakClassifiers[y].neg > weakClassifiers[y].pos)
+		{
+			console.log("\tBalancing Training Example...");
+		}
+		
+		var firstCode = locationOfActCode(weakClassifiers[y].act_code, training_data);	
+		while (weakClassifiers[y].neg > weakClassifiers[y].pos)
+		{
+			var thisCode = firstCode;
+			while (thisCode < l && training_data[thisCode].act_code == weakClassifiers[y].act_code && weakClassifiers[y].neg > weakClassifiers[y].pos)
+			{
+				weakClassifiers[y].pos++;
+				learnWeak(y, training_data[thisCode].text, 1);
+				thisCode++;
+			}	
 		}
 			
+		console.log("\t\tTotal Positive: "+weakClassifiers[y].pos+", Total Negative: "+weakClassifiers[y].neg);
 	}
 	
-	console.log("Training Length is:"+ training_data.length);
-	for ( var v = 0; v < training_data.length; v++)
+	//clean up
+	sz = l-1;
+	while (sz--)
 	{
-		count++;
-		if ((count % 1000) == 0)
-		{
-			console.log("\tLearned "+ count+" coded projects.");
-		}
-
-		//the default classifier, make it learn
-		
-		text = uncompress(training_data[v].text);
-		text = text.toString('utf8');
-		classifier.learn(text, training_data[v].act_code);
-
-		//the individual activity code classifiers, make them learn
-		if (!act_classifiers[training_data[v].act_code])
-		{
-			act_classifiers[training_data[v].act_code] = bayes();
-			act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
-			act_classifiers[training_data[v].act_code].nExamples =  1;
-		}
-		else
-		{
-			act_classifiers[training_data[v].act_code].learn(text, training_data[v].act_code);
-			act_classifiers[training_data[v].act_code].nExamples++;
-		}
+		training_data.splice(sz,1);
 	}
-	console.log("Done Training: Total Records: "+count);
- 	
+	
+	console.log("End Training.");
+	
 })
 
 var sys = require("sys");
 	
 	var my_http = require("http");
-	var nCodeLength = 0;
-	var nMaxCodes = 1;
-	var nMinCodes = 1;
-	
 	my_http.createServer(function(req,res){
 	
 		var body = "";
@@ -614,183 +529,41 @@ var sys = require("sys");
   		//parse the input string, get text, sector, donor and recipient
   		var queryData = url.parse(req.url, true).query;
   		orig_input_string = queryData.description;			//get the text to classify from the querystring
-  		sector = queryData.sector;							//get the sector data from the querystring
-  		donor = queryData.donor;							//get the donor data from the querystring
-  		recipient = queryData.recipient;					// get the recipient data from the querystring
   		id = queryData.id;
   		
   		thold = queryData.thold;
-  		ttype = queryData.ttype;
-  		purge = queryData.purge;
-  	
   		input_string = cleanText(orig_input_string);
   		
   		//handle request
   		req.on('end', function () {
-    		
+    	
     		//answer array
     		var ans =[];
-    		
-    		if (purge == 1)
-    		{
-    			console.log("\tPurging LRU Cache...");
-    			for (var u = 0; u < aClassifiers.length; u++)
-    			{
-    				aClassifiers.pop();
-    			}
-    		}
-    		
+    			
 			//check to see if the classifier is ready (has read all the training input)
-			if (bReady)
+			
+			console.log("Project: " +id);
+			
+			var test = null;
+			var nCodes = 0;
+			var nProjs = 0;
+					
+			//if we have all of our good classes to attempt classification with
+			var classVoters = [];
+		
+			for (var r = 0; r < weakClassifiers.length; r++)
 			{
-				console.log("Project: " +id);
+				test = weakClassifiers[r].categorize_list(input_string);
+				test.act_code =  weakClassifiers[r].act_code;
+				classVoters.push(test);	
+			}		
+			
+			console.log("\tWe have "+classVoters.length+" classifiers voting.");
+			var votes = everybodyVotes(classVoters, input_string);
+		
+			ans = getCodesbyMAD(votes, thold);
+			console.log("\t-----------------------------------------------");				
 				
-				var test = null;
-				var szClass = 'Donor + Recipient';
-				var classKey =  donor + recipient;
-				var nCodes = 0;
-				var training_size = 0;
-				var nProjs = 0;
-				var theseClassifiers = [];
-				
-				// check to see if this can be coded by rule
-    			coderule = [];
-    			coderule = findcoderule(training_data, md5(input_string), md5(donor), md5(recipient));
-    			bFinished = (coderule.length > 0);
-
-				while (!bFinished)
-				{
-					//the key is hashing the class (donor,etc)
-					var hk = md5(classKey+szClass);
-				
-					//if we dont already have a classifier for this class-- 
-					if (findClassifier(hk) < 0)
-					{
-						var thisData;
-						console.log("\tAttempting Class Specific Coder for: "+classKey+szClass);
-					
-						// filter and count training size
-						thisData = fastfilter(training_data, md5(classKey), szClass);
-						training_size = thisData.length;
-					
-						nProjs = countProjects (thisData);					
-					
-						//check to see if we have enough activity codes to attempt classification with
-						if (nProjs >= nCodesThreshold)
-						{
-							// create the classifier if we dont have it
-							var indexOf = findClassifier(hk);
-							if (indexOf < 0) 
-							{ 
-								console.log("\tNot Found in Cache, Must Create For: "+classKey+szClass);
-								var i = aClassifiers.length;
-							
-								//LRU the list of classifiers
-								findClasstoPrune(bayes());
-							
-								//we pushed it onto the end
-								i = aClassifiers.length;
-								aClassifiers[i-1].hash = hk;
-								aClassifiers[i-1].className = classKey+szClass
-							
-							}
-							
-							//the index of the classifier to use
-							var i = findClassifier(hk);
-						
-							for (var y = 0; y < thisData.length; y++)
-							{
-								var text =  uncompress(training_data[y].text).toString('utf8');	
-								aClassifiers[i].learn(text,  thisData[y].act_code);
-						
-							}
-							aClassifiers[i].numProjects = nProjs;
-							aClassifiers[i].training_size = thisData.length;
-							aClassifiers[i].votemult = getVotesMultByClass(szClass);
-							theseClassifiers.push(aClassifiers[i]);
-						
-						}
-						else
-						{
-							console.log("\tNot enough projects for: "+classKey+szClass+". Needed "+nCodesThreshold+", got "+nProjs);
-						}		
-					}
-					else
-					{				
-						//if we have it cached, touch it to move it to the LRU
-						console.log("\tClassifier Exists in Cache For: "+classKey+szClass);
-						touchedClass = aClassifiers[findClassifier(hk)];
-						aClassifiers.splice(findClassifier(hk),1);
-						aClassifiers.push(touchedClass);
-						theseClassifiers.push(touchedClass);
-					
-					}
-				
-					//try all class types
-					if (szClass == 'Donor + Recipient')
-					{
-						classKey = donor;
-						console.log("\tTrying Donor Only Class for: "+classKey+szClass);
-						szClass = 'Donor';
-					
-					}
-					else if (szClass == 'Donor')
-					{
-						classKey = recipient;
-						console.log("\tTrying Recipient Only Class for: "+classKey+szClass);
-						szClass = 'Recipient';
-					}
-					else
-					{	
-						bFinished = true;			
-					}
-				}
-				
-				//if we have all of our good classes to attempt classification with
-				if (bFinished)
-				{
-					var classVoters = [];
-				
-					for (var r = 0; r < theseClassifiers.length; r++)
-					{
-						test = theseClassifiers[r].categorize_list(input_string);
-						test.votemult = theseClassifiers[r].votemult;
-						classVoters.push(test);
-					}
-				
-					//use the dumb as dirt default classifier, too
-					test = classifier.categorize_list(input_string);
-					test.votemult = getVotesMultByClass('default');
-					classVoters.push(test);
-					
-					// get codes to report out , based upon the code rules, or threshold value and threshold type
-					if (coderule.length > 0)
-					{
-						console.log("\tCoding By Rule.." + JSON.stringify(coderule));
-						ans = coderule;
-					}
-					else
-					{
-						console.log("\tWe have "+classVoters.length+" classifiers voting.");
-						var votes = everybodyVotes(classVoters, input_string);
-						if (ttype == 0)
-						{
-							ans = getCodesbyMAD(votes);
-						}
-						else
-						{
-							ans = getCodesbyPercentile(votes);
-						}
-					}
-					console.log("\t-----------------------------------------------");				
-				}	
-			}
-			else
-			{
-				res.writeHeader(200, {"Content-Type": "text/json"});
-				res.write("Engine is training, please wait");
-				res.end();
-			}	
 			res.writeHeader(200, {"Content-Type": "text/json"});
 			res.write(JSON.stringify(ans));
 			res.end();
