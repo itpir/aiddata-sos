@@ -7,7 +7,8 @@ var S = require('string');
 
 var autocoderURL = process.argv[2]; //the url to the autocoding service, such as: http://localhost:3000/classify.json
 var csvfile = process.argv[3]; 		//get the filename from the command line
-var thold = process.argv[4]; 		//get the MAD threshold value from the command line
+var thold = process.argv[4]; 		//get the threshold value from the command line
+var mode = process.argv[5]; 		//get the mode of the threshold
 var totalScore = 0;
 var possTotal = 0;
 var doc = 0;
@@ -39,14 +40,6 @@ function intersect(a, b,info)
         	}
         }
     }
-    if (max >=0)
-    {
-    	totalThreshold += info[max].vote;
-    }
-    else
-    {
-    	totalThreshold += info[info.length-1].vote;	
-    }
     return results;
 }
 
@@ -67,10 +60,9 @@ csv()
 	var codes = data.aiddata_activity_code.split("|");
 	codes = codes.map(function (val) { return val; });
 	
-
 	var options =
 	{
-    	url: autocoderURL + '?description='+total_desc+'&thold='+thold+"&id="+id,
+    	url: autocoderURL + '?description='+total_desc+'&thold='+thold+"&id="+id+'&mode='+mode,
     	codes:  codes,
     	len: total_desc.length,
     	total_desc: total_desc,
@@ -119,8 +111,6 @@ csv()
 			process.stdout.write(JSON.stringify(human_codes));
 			process.stdout.write('\t');
 			process.stdout.write(JSON.stringify(robo_codes));
-			process.stdout.write('\t');
-			process.stdout.write(JSON.stringify(mad));
 			process.stdout.write('\t');
 			process.stdout.write(this.req.res.request.len.toString());
 			process.stdout.write('\t');

@@ -3,18 +3,31 @@ var url = require('url');
 var S = require('string');
 var ss = require('simple-statistics');
 var md5 = require('MD5');
-var natural = require('natural');
-var keyword_extractor = require("keyword-extractor");
-var nGrams = natural.NGrams;
+
+compress = require('compress-buffer').compress;
+uncompress = require('compress-buffer').uncompress;
+
 
 var header = true;
-var gsz = 0;
+
 
 /***************************
 GET THE COMMAND LINE VARS
 ****************************/
 /* get the training file name from command line */
 var csvfile = process.argv[2];
+
+/*get the token count for TF*IDF. This is the value to limit of TF*IDF tokens to use as classifier trainers*/
+var tokcount = process.argv[3];
+
+/* get the document length used to determine when we tokenize (shorten) using TF*IDF*/		
+var tlen = process.argv[4];	
+
+/* get the number of documents tokenized to reset the TF*IDF state*/		
+var nDocsReset = process.argv[5];
+
+/* get the max training size*/		
+var nMaxSize = process.argv[6];
 
 // init classifiers and TF*IDF
 var natural = require('natural');
@@ -157,29 +170,51 @@ function locationOfProjCode(projcodemd5, array, start, end)
 	}
 }
 
+function initTF(classifiers)
+{
+	num = classifiers.length;
+	for (var c = 0; c < num; c++)
+	{
+		g = new TfIdf();
+		g.act_code = classifiers[c].act_code;
+		
+		weakTfidf.push(new TfIdf());
+	}
+}
+
 function learnWeak(i,text,code)
-{		
-	text = featureSelect(text);
+{	
+	text = featureSelect(weakTfidf[i],text,tokcount);
 	weakClassifiers[i].learn(text,code);
 }
 
-function featureSelect (text)
-{
 
-	var txtArr = keyword_extractor.extract(text,{
-			language:"english",
-			return_changed_case:false
-		});
-	
-	text = '';
-	for (g = 0; g < txtArr.length; g++)
+function featureSelect (tfidf,text,tokcount)
+{
+	var i = 0;
+
+	if (tfidf.documents.length > nDocsReset)
 	{
-		text += txtArr[g]+' ';
+		tfidf = new TfIdf(); 
 	}
 	
-	return text;
-	
+	if (text.length > tlen)
+	{
+		tfidf.addDocument(text);
+		text = '';
+		doc = tfidf.documents.length -1;
+		tfidf.listTerms(doc).forEach(function(item) 
+		{
+			i++;
+			if( i <= tokcount)
+			{
+				text += item.term+' ';
+			}
+		});
+	}
+	return text;	
 }
+
 
 function getMad(votes)
 {
@@ -203,31 +238,6 @@ function getMedian(votes)
 	return median;
 }
 
-
-function getCodesbyJenks(votes, classes)
-{
-	var ar = [];
-	var ans = [];
-	for (var y = 0;  y < votes.length; y++)
-	{
-		ar.push(votes[y].probability);
-	}
-	
- 	var jenks = ss.jenks(ar, classes);
-
- 	var f = 0;
- 	while (f < votes.length && (votes[f].probability >= jenks[0] &&  votes[f].probability <= jenks[1]))
- 	{
- 		ans.push(votes[f]);
- 		console.log(votes[f]);
- 		f++;	
- 	}
-	
-	return ans;
-	
-}
-
-
 function getCodesbyMAD(votes, thold)
 {
 	var ans = [];
@@ -235,34 +245,29 @@ function getCodesbyMAD(votes, thold)
 
 	var mad = getMad(votes);
 	var medianvotes = getMedian(votes);
-	outlier = thold;
-	
+
 	console.log("\t\tActivity Code\t\t\tRAW Vote\t\t\t\tMAD Vote\t\t\tMAD Threshold");
 	var y = 0;
 	while (y < votes.length)
 	{	
-		votes[y].Mi = ((0.6745) * Math.abs(votes[y].probability - medianvotes))/mad;
+		//console.log(votes[y].probability );
+		votes[y].di = votes[y].probability - medianvotes;
 		
-		if (typeof votes[y] != 'undefined' && Math.abs(votes[y].Mi) >= outlier)
+		votes[y].vote = ((0.6745)*(votes[y].di))/mad;
+		
+		console.log("\t\t"+votes[y].act_code+"\t\t\t"+votes[y].probability+"\t\t\t"+votes[y].di+"\t\t\t\t"+votes[y].vote);
+		if (typeof votes[y] != 'undefined' && Math.abs(votes[y].di) > thold)
 		{
-			console.log("\t\t"+votes[y].act_code+"\t\t\t"+votes[y].probability+"\t\t\t"+votes[y].Mi+"\t\t\t\t"+outlier);
 			ans.push(votes[y]);
-		}
-		else if (votes[y].Mi <= outlier)  //only single handed test
-		{
-			break;
 		}
 		y++;
 	}
 	if (ans.length == 0 && votes.length > 0)
 	{
-		console.log("\t\t"+votes[0].act_code+"\t\t\t"+votes[0].probability+"\t\t\t"+votes[0].Mi+"\t\t\t\t"+outlier);
 		ans.push(votes[0]);
 	}
 	return ans;
 }
-
-
 
 function codeInProj(code,id, training_data)
 {
@@ -274,7 +279,6 @@ function codeInProj(code,id, training_data)
 		if ( training_data[index].id === id)
 		{
 			bFound = true;
-			break;
 		}
 		index++;
 	}
@@ -300,30 +304,16 @@ function everybodyVotes(classVoters,input_string)
 
 }
 
-function stillTraining()
-{
-	var f = false;
-	for (var t = 0; t < weakClassifiers.length; t++)
-	{
-		if ( weakClassifiers[t].neg < (gsz/4) && weakClassifiers[t].neg < 20000)
-		{
-			f = true;
-			break;
-		}
-	}
-	
-	return f;
-}
 
 function cleanText (text)
 {
-	text = text.replace(/[\.,-\/#!$%\^&\*;:{}=\-_`~()]/g," ");
 	text = S(text).stripTags().s;
- 	text = S(text).humanize().s
+ 	text = S(text).stripPunctuation().s;
  	text = text.toLowerCase(text);
- 
+ 	
  	return text;
 }
+
 
 csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 
@@ -343,9 +333,13 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
  	{
 		strRow ='';
 		act_code ='';
+		super_sector ='';
+		sector ='';
 		title ='';
 		short_desc ='';
 		long_desc ='';
+		donor = '';
+		recipient = '';
 		project_id = '';
 		for (key in data)
 		{	
@@ -355,9 +349,17 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 			{
 				act_code = data[key];    
 			}
+			if (key == 'org')
+			{
+				donor = data[key];
+			}
 			 if (key == 'project_id')
 			{
 				project_id = data[key];
+			}
+			if (key == 'recipient')
+			{
+				recipient = data[key];
 			}
 			if (key == 'title') 
 			{
@@ -400,8 +402,8 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
  .on('end', function(count){
     console.log("Done Reading.");
     console.log("Finding Codes.");
-    gsz = training_data.length;
-    for (var c = 0; c < gsz; c++)
+    sz = training_data.length;
+    for (var c = 0; c < sz; c++)
     {
     	bFound = false;
     	
@@ -425,6 +427,7 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 	}
 	
 	console.log("Codes Found: "+weakClassifiers.length);
+	initTF(weakClassifiers);
 	
 	console.log("Sorting Codes.");
 	
@@ -433,6 +436,7 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		});
 	
 	console.log("Training Codes.");	
+	var l = sz;
 	
 	//sort by activity code
 	training_data.sort(function(a, b){	
@@ -440,25 +444,22 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 	});
 	t = 0;
 	
-	while (stillTraining())
+	while (t < l)
 	{
-		r = Math.floor(Math.random()*gsz);
+		r = Math.floor(Math.random()*l);
 		if (((t+1) % 100) == 0)
 		{
 			console.log(t+1);
-			global.gc();
-			
 		}
-		txt = featureSelect(training_data[r].text);
 		for (var y = 0; y < weakClassifiers.length; y++)
 		{
-			if ((training_data[r].act_code != weakClassifiers[y].act_code) && (weakClassifiers[y].neg < (gsz/4)) && (weakClassifiers[y].neg < 20000))
+			if ((training_data[r].act_code != weakClassifiers[y].act_code) && (weakClassifiers[y].neg < nMaxSize))
 			{
 				bF = codeInProj(weakClassifiers[y].act_code,training_data[r].id, training_data);
 				if (bF == false)
 				{
 					weakClassifiers[y].neg++;
-					learnWeak(y, txt, -1);
+					learnWeak(y, training_data[r].text, -1);
 				}
 			}
 		}
@@ -483,7 +484,6 @@ var sys = require("sys");
   		orig_input_string = queryData.description;			//get the text to classify from the querystring
   		id = queryData.id;
   		
-  		mode = queryData.mode;
   		thold = queryData.thold;
   		input_string = cleanText(orig_input_string);
   		
@@ -506,25 +506,19 @@ var sys = require("sys");
 		
 			for (var r = 0; r < weakClassifiers.length; r++)
 			{
-				txt = featureSelect(input_string);
-				test = weakClassifiers[r].categorize_list(txt);
+				test = weakClassifiers[r].categorize_list(input_string);
 				test.act_code =  weakClassifiers[r].act_code;
 				classVoters.push(test);	
 			}		
 			
+			console.log("\tWe have "+classVoters.length+" classifiers voting.");
 			var votes = everybodyVotes(classVoters, input_string);
 		
-			if (mode == 1)
-				ans = getCodesbyMAD(votes, thold);
-			else if (mode == 2)
-				ans = getCodesbyJenks(votes, thold);
-			else
-				ans = getCodesbyMAD(votes, 5.2);
-		
-			res.writeHeader(200, {"Content-Type": "text/json"});
-			res.write(JSON.stringify(ans));
+			ans = getCodesbyMAD(votes, thold);
 			console.log("\t-----------------------------------------------");				
 				
+			res.writeHeader(200, {"Content-Type": "text/json"});
+			res.write(JSON.stringify(ans));
 			res.end();
 	});
 
