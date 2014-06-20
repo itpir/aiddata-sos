@@ -5,7 +5,7 @@ var ss = require('simple-statistics');
 var md5 = require('MD5');
 var natural = require('natural');
 var keyword_extractor = require("keyword-extractor");
-var nGrams = natural.NGrams;
+var bayes = require('bayes');
 
 var header = true;
 var gsz = 0;
@@ -15,20 +15,13 @@ GET THE COMMAND LINE VARS
 ****************************/
 /* get the training file name from command line */
 var csvfile = process.argv[2];
-
-// init classifiers and TF*IDF
-var natural = require('natural');
-var TfIdf = natural.TfIdf;
+console.log(csvfile);
 
 var weakClassifiers = [];
 
-var weakTfidf = [];
 var training_data = [];
 
-var bayes = require('bayes');
-
 var total_count = 0;
-var bReady = false;
 
 Array.prototype.sumvotes = function() {
     var a = this.concat();
@@ -165,7 +158,6 @@ function learnWeak(i,text,code)
 
 function featureSelect (text)
 {
-
 	var txtArr = keyword_extractor.extract(text,{
 			language:"english",
 			return_changed_case:false
@@ -385,7 +377,7 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 			text : text,
 			coderulemd5: md5(text+act_code),
 			projcodemd5: md5(project_id+act_code)
-		}
+		};
 				
 		if( (index % 1000) == 0)
 		{
