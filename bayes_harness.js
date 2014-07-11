@@ -242,7 +242,7 @@ function cleanText (text)
 {
 	text = text.replace(/[\.,-\/#!$%\^&\*;:{}=\-_`~()]/g," ");
 	text = S(text).stripTags().s;
- 	text = S(text).humanize().s
+ 	text = S(text).humanize().s;
  	text = text.toLowerCase(text);
  
  	return text;
@@ -389,15 +389,17 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 	console.log("Start Training.");
 	for (var y = 0; y < weakClassifiers.length; y++)
 	{
-		console.log("Training Classifier for: " + weakClassifiers[y].act_code);
+		v = y+1;
+		console.log("\tTraining Classifier for: " + weakClassifiers[y].act_code+" ("+v+" of "+weakClassifiers.length+")");
 		weakClassifiers[y].train();
 	}
 	console.log("End Training.");
 	
-	console.log("Start Saving Classifiers");
+	console.log("Start Saving Classifiers.");
 	for (var y = 0; y < weakClassifiers.length; y++)
 	{
-		console.log("Saving Classifier for: " + weakClassifiers[y].act_code);
+		v = y+1;
+		console.log("\tSaving Classifier for: " + weakClassifiers[y].act_code+" ("+v+" of "+weakClassifiers.length+")");
 		f = weakClassifiers[y].act_code+".json"
 		c = weakClassifiers[y];
 		weakClassifiers[y].save(f, function(err, c) 
@@ -405,6 +407,7 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
     		// the classifier is saved to the act_code.json file
 		});
 	}
+	console.log("End Saving Classifiers.");
 
 })
 

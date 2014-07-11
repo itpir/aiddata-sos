@@ -20,10 +20,10 @@ process.stdout.write("id\ttext\thuman_codes\trobo_codes\tlog diff\tdoc_length\tr
     
 
 //we need at least the csvfile
-if (!csvfile || !autocoderURL || !thold )
+if (!csvfile || !autocoderURL  )
 {
 	console.log ("Missing Parameters, example:");
-    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt\" 3.5");
+    console.log("node codeharness.js http://localhost:3000/classify.json \"../data sets/aiddata22_WB500.txt");
 	process.exit(1);
 }
 
@@ -56,11 +56,6 @@ csv()
 	long_description = data.long_description;
 
 	total_desc = title+' '+short_description+' '+long_description;
-	
-	/*console.log(data.aiddata_activity_code);
-		console.log(title);
-			console.log(data.short_description);
-				console.log(data.long_description);*/
 
 	if (data.aiddata_activity_code)
 	{

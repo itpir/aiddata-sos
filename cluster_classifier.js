@@ -1,27 +1,3 @@
-var csv = require('csv');
-var url = require('url');
-var S = require('string');
-var ss = require('simple-statistics');
-var md5 = require('MD5');
-var natural = require('natural');
-var keyword_extractor = require("keyword-extractor");
-var bayes = require('bayes');
-var cluster = require('cluster');
-var fs = require('graceful-fs');
-var http = require('http');
-
-var classifierDir = process.argv[2]; //directory containing the json files to load the classifier with
-
-var numCPUs = require('os').cpus().length;
-
-console.log("CPUS: "+numCPUs);
-
-var gsz = 0;
-var gFiles, gF = 0;
-
-var weakClassifiers = [];
-var training_data = [];
-var total_count = 0;
 
 Array.prototype.sumvotes = function() {
     var a = this.concat();
@@ -43,6 +19,11 @@ Array.prototype.sumvotes = function() {
 
 function populateClassifiers(err,files)
 {
+	var fs2 = require('fs');
+	
+	var Bagpipe = require('bagpipe');
+	var bagpipe = new Bagpipe(10);
+
 	gFiles = files.length;
 	gF = gFiles;
 	for (c = 0; c < files.length; c++)
@@ -51,7 +32,7 @@ function populateClassifiers(err,files)
 		fn = classifierDir+files[c];
 		cl.fn = fn;
 		
-		fs.readFile(fn, function (err, data) 
+		bagpipe.push(fs2.readFile, fn, function (err, data) 
 		{
 			if (err) throw err;
 			var myClass = JSON.parse(data.toString());
@@ -86,6 +67,8 @@ function featureSelect (text)
 	
 }
 
+
+      
 function getCodesbyJenks(votes, classes)
 {
 	var ar = [];
@@ -147,59 +130,94 @@ function cleanText (text)
  	return text;
 }
 
+var cluster = require('cluster');
+var os = require('os');
 
-fs.readdir(classifierDir, populateClassifiers);
 
-http.createServer(function(req,res){
 
-	var body = "";
-	req.on('data', function (chunk) {
-		body += chunk;
+if (cluster.isMaster)
+{
+	var numCPUs = require('os').cpus().length;
+	var nForks = Math.ceil(numCPUs/3);
+	console.log("We will be creating "+nForks+" forks.");
+	
+	// Spawn as many workers as there are CPUs in the system.
+	for (var i = 0; i < nForks; i++)
+	{
+		cluster.fork();
+	}
+}
+else
+{
+	var url = require('url');
+	var S = require('string');
+	var ss = require('simple-statistics');
+	var natural = require('natural');
+	var keyword_extractor = require("keyword-extractor");
+	var http = require('http');
+	var fs = require('graceful-fs');
+	
+	var classifierDir = process.argv[2]; //directory containing the json files to load the classifier with
+
+
+	var gsz = 0;
+	var gFiles, gF = 0;
+
+	var weakClassifiers = [];
+
+	fs.readdir(classifierDir, populateClassifiers);
+
+	http.createServer(function(req,res){
+
+		var body = "";
+		req.on('data', function (chunk) {
+			body += chunk;
+		});
+
+		//parse the input string, get text, sector, donor and recipient
+		var queryData = url.parse(req.url, true).query;
+		orig_input_string = queryData.description;			//get the text to classify from the querystring
+		id = queryData.id;
+
+		mode = queryData.mode;
+		thold = queryData.thold;
+		input_string = cleanText(orig_input_string);
+
+		//handle request
+		req.on('end', function () {
+
+			//answer array
+			var ans =[];
+		
+			//check to see if the classifier is ready (has read all the training input)
+	
+			console.log("Project: " +id);
+			
+			//if we have all of our good classes to attempt classification with
+			var classVoters = [];
+
+			for (var r = 0; r < weakClassifiers.length; r++)
+			{
+				txt = featureSelect(input_string);
+				test = weakClassifiers[r].getClassifications(txt);
+				test.act_code =  weakClassifiers[r].act_code;
+				classVoters.push(test);	
+			}		
+	
+			var votes = everybodyVotes(classVoters, input_string);
+			var f = (Math.floor(gF/20)+1);
+		
+			ans = getCodesbyJenks(votes, f);
+	
+			res.writeHeader(200, {"Content-Type": "text/json"});
+			res.write(JSON.stringify(ans));
+			console.log("\t-----------------------------------------------");				
+		
+			res.end();
 	});
 
-	//parse the input string, get text, sector, donor and recipient
-	var queryData = url.parse(req.url, true).query;
-	orig_input_string = queryData.description;			//get the text to classify from the querystring
-	id = queryData.id;
-
-	mode = queryData.mode;
-	thold = queryData.thold;
-	input_string = cleanText(orig_input_string);
-
-	//handle request
-	req.on('end', function () {
-
-		//answer array
-		var ans =[];
-		
-		//check to see if the classifier is ready (has read all the training input)
-	
-		console.log("Project: " +id);
-			
-		//if we have all of our good classes to attempt classification with
-		var classVoters = [];
-
-		for (var r = 0; r < weakClassifiers.length; r++)
-		{
-			txt = featureSelect(input_string);
-			test = weakClassifiers[r].getClassifications(txt);
-			test.act_code =  weakClassifiers[r].act_code;
-			classVoters.push(test);	
-		}		
-	
-		var votes = everybodyVotes(classVoters, input_string);
-		var f = (Math.floor(gF/20)+1);
-		
-		ans = getCodesbyJenks(votes, f);
-	
-		res.writeHeader(200, {"Content-Type": "text/json"});
-		res.write(JSON.stringify(ans));
-		console.log("\t-----------------------------------------------");				
-		
-		res.end();
-});
-
-}).listen(8081);
+	}).listen(8081);
+}
 	
 	
  
