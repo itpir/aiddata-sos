@@ -86,7 +86,6 @@ function getCodesbyJenks(votes, classes)
 		while (f < votes.length && (votes[f].value >= jenks[0] &&  votes[f].value <= jenks[1]))
 		{
 			ans.push(votes[f]);
-			console.log(votes[f]);
 			f++;	
 		}
 	}
@@ -119,7 +118,6 @@ function everybodyVotes(classVoters,input_string)
 
 }
 
-
 function cleanText (text)
 {
 	text = text.replace(/[\.,-\/#!$%\^&\*;:{}=\-_`~()]/g," ");
@@ -133,12 +131,10 @@ function cleanText (text)
 var cluster = require('cluster');
 var os = require('os');
 
-
-
 if (cluster.isMaster)
 {
 	var numCPUs = require('os').cpus().length;
-	var nForks = Math.ceil(numCPUs/3);
+	var nForks = Math.ceil(numCPUs/4);
 	console.log("We will be creating "+nForks+" forks.");
 	
 	// Spawn as many workers as there are CPUs in the system.
@@ -205,7 +201,7 @@ else
 			}		
 	
 			var votes = everybodyVotes(classVoters, input_string);
-			var f = (Math.floor(gF/20)+1);
+			var f = (Math.ceil(gF/20)+1);
 		
 			ans = getCodesbyJenks(votes, f);
 	

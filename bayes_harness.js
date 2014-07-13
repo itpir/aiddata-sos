@@ -5,7 +5,6 @@ var ss = require('simple-statistics');
 var md5 = require('MD5');
 var natural = require('natural');
 var keyword_extractor = require("keyword-extractor");
-var bayes = require('bayes');
 var cluster = require('cluster');
 var numCPUs = require('os').cpus().length;
 
@@ -255,11 +254,6 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 {
 	if (header)
     {
-    	strHeader ='';
-    	for (key in data)
-    	{	
- 			strHeader += key+'|';	
- 		}
  		header = false;	
  	}
  	else
