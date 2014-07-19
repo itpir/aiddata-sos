@@ -108,9 +108,10 @@ function locationOfActCode(act_code, array, start, end)
 	start = start || 0;
 	end = end || array.length;
 	var pivot = parseInt(start + (end - start) / 2, 10);
-	if (array[pivot].act_code === act_code)
+	//console.log(act_code+" "+(array[pivot].act_code+array[pivot].id));
+	if ((array[pivot].act_code+array[pivot].id) === act_code)
 	{
-		while (pivot >= 0 && array[pivot].act_code == act_code)
+		while (pivot >= 0 && (array[pivot].act_code+array[pivot].id) == act_code)
 		{
 			pivot--;
 		}
@@ -121,7 +122,7 @@ function locationOfActCode(act_code, array, start, end)
 	{
 		return 0;
 	}
-	if (array[pivot].act_code < act_code) 
+	if ((array[pivot].act_code+array[pivot].id) < act_code) 
 	{
 		return locationOfActCode(act_code, array, pivot, end);
 	} 
@@ -188,19 +189,10 @@ function featureSelect (text)
 
 function codeInProj(code,id, training_data)
 {
-	var index = locationOfActCode(code, training_data);
+	var index = locationOfActCode((code+id), training_data);
+	//console.log(index);
 	
-	bFound = false;
-	while ((index < training_data.length) && (training_data[index].act_code === code) && (bFound == false))
-	{
-		if ( training_data[index].id === id)
-		{
-			bFound = true;
-			break;
-		}
-		index++;
-	}
-
+	bFound = (index > 0);
 	return bFound;
 }
 function everybodyVotes(classVoters,input_string)
@@ -336,8 +328,6 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		if (!bFound)
 		{
   			var cl = new natural.BayesClassifier();
-			//var cl = bayes();
-			cl.pos = 0;
 			cl.neg = 0;
 			cl.count = 1;
 			cl.act_code = training_data[c].act_code;
@@ -351,7 +341,10 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 	
 	//sort by activity code
 	training_data.sort(function(a, b){	
-		return a.act_code.localeCompare(b.act_code);
+		//return a.act_code.localeCompare(b.act_code);
+		i1 = a.act_code+a.id;
+		i2 = b.act_code+b.id;
+		return i1.localeCompare(i2);
 	});
 	t = 0;
 	
@@ -368,11 +361,9 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		{
 			if ((training_data[r].act_code != weakClassifiers[y].act_code) && (weakClassifiers[y].neg < MAX_NEG))
 			{
-				//console.log('finding');
 				bF = codeInProj(weakClassifiers[y].act_code,training_data[r].id, training_data);
 				if (bF == false)
 				{
-					//console.log('classifying');
 					weakClassifiers[y].neg++;
 					learnWeak(y, txt, "-");
 				}
