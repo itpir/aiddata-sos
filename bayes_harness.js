@@ -28,26 +28,6 @@ var weakClassifiers = [];
 
 var training_data = [];
 
-var total_count = 0;
-
-Array.prototype.sumvotes = function() {
-    var a = this.concat();
-    for(var i=0; i<a.length; ++i) 
-    {
-        for(var j=i+1; j<a.length; ++j) 
-        {
-            if(a[i].category === a[j].category)
-            {
-            	s = a[i].vote+a[j].vote;
-            	a[i].nVotes += a[j].nVotes;
-            	a[i].vote += a[j].vote;
-                a.splice(j, 1); 
-            }
-        }
-    }
-    return a;
-};
-
 function insertIntoTraining(rec,training_data)
 {
 	i = locationOf(rec,training_data);
