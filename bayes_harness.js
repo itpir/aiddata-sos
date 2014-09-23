@@ -5,10 +5,6 @@ var ss = require('simple-statistics');
 var md5 = require('MD5');
 var natural = require('natural');
 var keyword_extractor = require("keyword-extractor");
-var cluster = require('cluster');
-var numCPUs = require('os').cpus().length;
-
-console.log("CPUS: "+numCPUs);
 
 var header = true;
 var gsz = 0;
@@ -21,6 +17,7 @@ var csvfile = process.argv[2];
 
 /* get the training size */
 var MAX_NEG = Math.max(process.argv[3],100);
+var MIN_POS = 1;
 
 console.log(csvfile);
 
@@ -175,6 +172,8 @@ function codeInProj(code,id, training_data)
 	bFound = (index > 0);
 	return bFound;
 }
+
+
 function everybodyVotes(classVoters,input_string)
 {
 	var ans = [];
@@ -194,6 +193,18 @@ function everybodyVotes(classVoters,input_string)
 
 }
 
+/***********************************************************
+stillTraining()
+
+params: none
+
+purpose:
+check to see if we are still training
+we are still training if we havent seen enough negative examples
+and and havent seen enough positive examples, either
+
+returns: boolean , true if we are still not finished training
+************************************************************/
 function stillTraining()
 {
 	var f = false;
@@ -271,7 +282,6 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		var rec = {
 			act_code: act_code,
 			id : project_id,
-			count: 0,
 			text : text,
 			coderulemd5: md5(text+act_code),
 			projcodemd5: md5(project_id+act_code)
@@ -284,8 +294,6 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		
 		if (text.length > 0)
 			insertIntoTraining(rec,training_data);
-		
-		
 	}
  })
  
@@ -301,7 +309,6 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		{
 			if (weakClassifiers[y].act_code == training_data[c].act_code)
 			{
-				weakClassifiers[y].count++;
 				bFound = true;
 			}
 		}
@@ -309,36 +316,72 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 		{
   			var cl = new natural.BayesClassifier();
 			cl.neg = 0;
-			cl.count = 1;
+			cl.pos = 0;
 			cl.act_code = training_data[c].act_code;
 			weakClassifiers.push(cl);
 		}
 	}
 	
-	console.log("Codes Found: "+weakClassifiers.length);
+	var lClasses = weakClassifiers.length;
+	var perCode = Math.ceil(MAX_NEG/lClasses);	
+	MIN_POS = perCode;
+	console.log("Minimum Positive Class Size: "+MIN_POS);
+	console.log("Codes Found: "+lClasses);
+	console.log("Training Codes.");
 	
-	console.log("Training Codes.");	
-	
-	//sort by activity code
-	training_data.sort(function(a, b){	
-		//return a.act_code.localeCompare(b.act_code);
+	//sort by activity code+proj_id
+	training_data.sort(function(a, b)
+	{	
 		i1 = a.act_code+a.id;
 		i2 = b.act_code+b.id;
 		return i1.localeCompare(i2);
 	});
-	t = 0;
 	
-	while (stillTraining())
+	//train the positive examples, as negative examples across all the classes
+	for (var f = 0; f < lClasses; f++)
 	{
-		r = Math.floor(Math.random()*gsz);
-		if (((t+1) % 1000) == 0)
+		v = f + 1;
+		console.log("\tTraining Classifier for: " + weakClassifiers[f].act_code+" ("+v+" of "+weakClassifiers.length+"), Stage #1");
+		theseCodes = training_data.filter(function (el) {
+			return el.act_code == weakClassifiers[f].act_code;
+		});
+		
+		var c = 0;
+		while (c < perCode)
 		{
-			console.log(t+1);
-			global.gc();
+			r = Math.floor(Math.random()*theseCodes.length);
+			txt = theseCodes[r].text;
+			for (var y = 0; y < weakClassifiers.length; y++)
+			{
+				if (theseCodes[r].act_code != weakClassifiers[y].act_code)
+				{
+					bF = codeInProj(weakClassifiers[y].act_code,theseCodes[r].id, training_data);
+					if (bF == false)
+					{
+						weakClassifiers[y].neg++;
+						learnWeak(y, txt, "-");
+					}
+				}
+				if (theseCodes[r].act_code == weakClassifiers[y].act_code) 
+				{
+					weakClassifiers[y].pos++;	
+				}
+			}
+			c++;
 		}
+	}
+	
+	//stage #2, fill in any negative examples with random samples from the training data.
+	
+	t = 0;
+	while (stillTraining())
+	{	
+		r = Math.floor(Math.random()*gsz);
 		txt = training_data[r].text;
 		for (var y = 0; y < weakClassifiers.length; y++)
 		{
+			v = y + 1;
+			console.log("\tTraining Classifier for: " + weakClassifiers[y].act_code+" ("+v+" of "+weakClassifiers.length+"), Stage #2");
 			if ((training_data[r].act_code != weakClassifiers[y].act_code) && (weakClassifiers[y].neg < MAX_NEG))
 			{
 				bF = codeInProj(weakClassifiers[y].act_code,training_data[r].id, training_data);
@@ -348,14 +391,17 @@ csv().from.path(csvfile, { columns: true, delimiter: "\t" } )
 					learnWeak(y, txt, "-");
 				}
 			}
+			if (training_data[r].act_code == weakClassifiers[y].act_code) 
+			{
+				weakClassifiers[y].pos++;	
+			}
 		}
 		t++;
 	}
-	console.log("Start Training.");
 	for (var y = 0; y < weakClassifiers.length; y++)
 	{
 		v = y+1;
-		console.log("\tTraining Classifier for: " + weakClassifiers[y].act_code+" ("+v+" of "+weakClassifiers.length+")");
+		console.log("\tTraining Classifier for: " + weakClassifiers[y].act_code+" ("+v+" of "+weakClassifiers.length+"), Stage #3");
 		weakClassifiers[y].train();
 	}
 	console.log("End Training.");

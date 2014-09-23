@@ -134,7 +134,7 @@ var os = require('os');
 if (cluster.isMaster)
 {
 	var numCPUs = require('os').cpus().length;
-	var nForks = Math.ceil(numCPUs/4);
+	var nForks = Math.ceil(numCPUs/8);
 	console.log("We will be creating "+nForks+" forks.");
 	
 	// Spawn as many workers as there are CPUs in the system.
@@ -207,8 +207,7 @@ else
 	
 			res.writeHeader(200, {"Content-Type": "text/json"});
 			res.write(JSON.stringify(ans));
-			console.log("\t-----------------------------------------------");				
-		
+
 			res.end();
 	});
 
