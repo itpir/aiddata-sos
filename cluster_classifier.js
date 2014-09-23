@@ -184,8 +184,6 @@ else
 
 			//answer array
 			var ans =[];
-		
-			//check to see if the classifier is ready (has read all the training input)
 	
 			console.log("Project: " +id);
 			
