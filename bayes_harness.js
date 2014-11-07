@@ -4,8 +4,7 @@ var S = require('string');
 var ss = require('simple-statistics');
 var md5 = require('MD5');
 var natural = require('natural');
-var keyword_extractor = require("keyword-extractor");
-
+var keyword_extractor = require('keyword-extractor');
 var header = true;
 var gsz = 0;
 

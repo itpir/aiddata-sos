@@ -172,42 +172,42 @@ else
 
 		//parse the input string, get text, sector, donor and recipient
 		var queryData = url.parse(req.url, true).query;
-		orig_input_string = queryData.description;			//get the text to classify from the querystring
-		id = queryData.id;
+		if (queryData.description)
+		{
+			orig_input_string = queryData.description;			//get the text to classify from the querystring
+			id = queryData.id;
+			input_string = cleanText(orig_input_string);
 
-		mode = queryData.mode;
-		thold = queryData.thold;
-		input_string = cleanText(orig_input_string);
+			//handle request
+			req.on('end', function () {
 
-		//handle request
-		req.on('end', function () {
-
-			//answer array
-			var ans =[];
+				//answer array
+				var ans =[];
 	
-			console.log("Project: " +id);
+				console.log("Project: " +id);
 			
-			//if we have all of our good classes to attempt classification with
-			var classVoters = [];
+				//if we have all of our good classes to attempt classification with
+				var classVoters = [];
 
-			for (var r = 0; r < weakClassifiers.length; r++)
-			{
-				txt = featureSelect(input_string);
-				test = weakClassifiers[r].getClassifications(txt);
-				test.act_code =  weakClassifiers[r].act_code;
-				classVoters.push(test);	
-			}		
+				for (var r = 0; r < weakClassifiers.length; r++)
+				{
+					txt = featureSelect(input_string);
+					test = weakClassifiers[r].getClassifications(txt);
+					test.act_code =  weakClassifiers[r].act_code;
+					classVoters.push(test);	
+				}		
 	
-			var votes = everybodyVotes(classVoters, input_string);
-			var f = (Math.ceil(gF/20)+1);
+				var votes = everybodyVotes(classVoters, input_string);
+				var f = (Math.ceil(gF/20)+1);
 		
-			ans = getCodesbyJenks(votes, f);
+				ans = getCodesbyJenks(votes, f);
 	
-			res.writeHeader(200, {"Content-Type": "text/json"});
-			res.write(JSON.stringify(ans));
+				res.writeHeader(200, {"Content-Type": "text/json"});
+				res.write(JSON.stringify(ans));
 
-			res.end();
-	});
+				res.end();
+			});
+		}
 
 	}).listen(8081);
 }
